@@ -77,6 +77,10 @@ const rt = startRuntime({
   },
 });
 
+const endedLog: string[] = [];
+const endedCount = (): number => endedLog.length;
+const endedRecent = (): string[] => endedLog.slice(0, 5);
+
 const state = () => {
   const tickets = rt.repo.tickets.open().map((t) => ({
     id: t.id,
@@ -86,8 +90,12 @@ const state = () => {
     session: t.assignment?.sessionId ?? '—',
     dir: t.assignment?.dir ?? '—',
   }));
+  const endedRows = rt.repo.atomic(() => 0);
+  void endedRows;
   return {
     tickets,
+    ended: endedCount(),
+    endedRecent: endedRecent(),
     panel: renderPanel(rt.repo.tickets.open()),
     slots: { used: slots.used, capacity: slots.capacity },
     live: executor.live,
@@ -136,8 +144,11 @@ const server = createServer((req, res) => {
       const b = await body();
       const t = rt.repo.tickets.get(String(b.id ?? ''));
       if (t === undefined) return json(404, { error: '没有这张工单' });
+      // 先停会话释放槽位，再结束工单；否则 approve 之后槽位会一直占着（每批准一个漏一个）
+      if (t.assignment !== undefined) await executor.stop(t, t.assignment, 'approved');
       rt.engine.close(t);
-      log(`人批准 ${t.id}`);
+      endedLog.unshift(`${t.id} ${t.threadKey} @${new Date().toISOString().slice(11, 19)}`);
+      log(`人批准 ${t.id}（会话已停、槽位已释放）`);
       await rt.tick();
       return json(200, state());
     }

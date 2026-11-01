@@ -49,6 +49,8 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
   <div class="kpi" id="kpi"></div>
   <table><thead><tr><th>工单</th><th>阶段</th><th>线程</th><th>会话</th><th>状态</th><th></th></tr></thead>
   <tbody id="tickets"><tr><td colspan="6" class="empty">还没有工单</td></tr></tbody></table>
+  <h2 style="margin-top:18px">已结束（最近 5 个）</h2>
+  <pre id="ended">（还没有）</pre>
   <h2 style="margin-top:18px">最近事件</h2>
   <pre id="log">—</pre>
  </section>
@@ -79,7 +81,9 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
     $('panel').textContent = s.panel || '（空）';
     $('log').textContent = s.events.length ? s.events.join('\\n') : '—';
     var needHuman = s.panel ? s.panel.split('\\n').filter(function (l) { return l.trim().indexOf('- ') === 0; }).length : 0;
-    $('kpi').innerHTML = '<span>工单 <b>' + s.tickets.length + '</b></span><span>需要人 <b>' + needHuman + '</b></span>';
+    $('kpi').innerHTML = '<span>进行中 <b>' + s.tickets.length + '</b></span><span>需要人 <b>' + needHuman +
+      '</b></span><span>已结束 <b>' + s.ended + '</b></span>';
+    $('ended').textContent = s.endedRecent.length ? s.endedRecent.join('\\n') : '（还没有）';
     var tb = $('tickets');
     if (!s.tickets.length) {
       tb.innerHTML = '<tr><td colspan="6" class="empty">还没有工单</td></tr>';
