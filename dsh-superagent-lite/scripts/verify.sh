@@ -48,6 +48,13 @@ for n in 1 2 3 4 5; do
   printf '%s | %s | %s\n' "$id" "$status" "$detail"
 done
 
+# 控制台页面脚本（经典脚本可解析 / 入口挂在 window 上 / 按钮有绑定）——它坏了页面按钮就是死的
+if node scripts/check-page.ts >/tmp/verify-page.log 2>&1; then
+  printf 'PAGE | PASS | %s\n' "$(sed -n 's/^页面脚本 OK：//p' /tmp/verify-page.log | head -1)"
+else
+  fail=1; printf 'PAGE | FAIL | 见 node scripts/check-page.ts\n'
+fi
+
 echo "exit code: $fail"
 if [ "$fail" -ne 0 ]; then
   echo "--- node --test 尾部（诊断用）---" >&2
