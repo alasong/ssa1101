@@ -65,13 +65,15 @@ dsh-superagent-lite/
 
 ```text
 ssa1101/
+├── README.md                入口：30 秒跑起来 / CLI 用法 / 装进 dsh / 已知未完成
 ├── docs/                    交付物：要被人拿去做决策的 5 份文档
 │   ├── REQUIREMENTS.md      交付物 1：23 条 R（accept / verify_cmd / who / impact / source）
 │   ├── ARCHITECTURE.md      交付物 2：五层七端口、写者表、复用边界
 │   ├── DETAILED-DESIGN.md   交付物 3：本文——目录设计、接口、数据模型、状态机、时序
 │   ├── TASKS.md             交付物 4：14 个开发任务（与目标树节点同构）
 │   └── DELIVERY.md          交付说明、机检读数、未定清单
-├── check-delivery.py        机检脚本（10 条判据，任一不过 exit 1），复跑入口固定在根
+├── check-delivery.py        机检脚本（11 条判据，任一不过 exit 1），复跑入口固定在根
+├── LICENSE                  远端初始提交带进来的许可证，未改
 ├── dsh-superagent-lite/     落地代码骨架：13 个目录 + README 已建，代码文件留给 K01–K14
 └── notes/                   过程与输入，不作为交付物
     ├── phase0-analysis.md     原型分析 + 26 bundle 归位 + 两轮评审记录
@@ -80,7 +82,7 @@ ssa1101/
     └── EXCEEDS.md             11 条超额项 + 3 条被踢出的自我表扬候选
 ```
 
-**归置规则**：根目录只留**入口与容器**——`docs/`（五份交付文档）、`check-delivery.py`（复跑入口，固定在根，方便 `python3 check-delivery.py` 直接跑）、`dsh-superagent-lite/`（代码骨架）、`notes/`（过程件）。**约定：本仓文档里写的路径一律相对仓库根**，不随文件所在目录变化（`docs/` 里写 `notes/xxx` 指仓库根的 `notes/xxx`）。**不为图整齐而加层级**：`docs/` 分出来是因为根目录要能一眼看出"文档在 docs/、代码在 dsh-superagent-lite/"；`notes/` 放"只被上面引用的过程件"。旧 `DESIGN.md` 已删除——它假设自建整套 core，与 kaa 复用决定冲突；其中仍有价值的插件接线表已迁入 `ARCHITECTURE.md` §5.1，T1–T8 / S1–S9 已并入本文第 9 节。
+**归置规则**：根目录只留**入口与容器**——`README.md`（给人看的入口，只写「怎么用」不写设计）、`docs/`（五份交付文档）、`check-delivery.py`（复跑入口，固定在根，方便 `python3 check-delivery.py` 直接跑）、`dsh-superagent-lite/`（代码骨架）、`notes/`（过程件）。**约定：本仓文档里写的路径一律相对仓库根**，不随文件所在目录变化（`docs/` 里写 `notes/xxx` 指仓库根的 `notes/xxx`）。**不为图整齐而加层级**：`docs/` 分出来是因为根目录要能一眼看出"文档在 docs/、代码在 dsh-superagent-lite/"；`notes/` 放"只被上面引用的过程件"。旧 `DESIGN.md` 已删除——它假设自建整套 core，与 kaa 复用决定冲突；其中仍有价值的插件接线表已迁入 `ARCHITECTURE.md` §5.1，T1–T8 / S1–S9 已并入本文第 9 节。
 
 ### 1.2.1 每份文档的设计
 
