@@ -1,0 +1,5 @@
+# 坏夹具（T13 破坏实验）：disabledTools 清空 = 工具加满。
+- id: agent-preset
+  config:
+    name: superagent-worker
+    disabledTools: []

@@ -1,0 +1,7 @@
+# 执行器（worker）preset 补丁（R20 的另一半：worker 面 ≠ 主会话面）
+# worker 要能写文件、能起子代理，但不需要面板与插件管理。
+- id: agent-preset
+  config:
+    name: superagent-worker
+    disabledTools:
+      - tool-plugin-manager

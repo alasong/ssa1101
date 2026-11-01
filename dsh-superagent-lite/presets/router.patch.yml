@@ -1,0 +1,9 @@
+# 主会话 preset 补丁（R20 的一半：主会话不含写文件/子代理工具）
+# 只写「比 turbo-preset 少什么」，不复制整份清单——差异写在这里，基线留在 turbo-preset。
+# 生效方式：作为 profile 的 agent preset 叠加层，具体接线在 K06（组合根）。
+- id: agent-preset
+  config:
+    name: superagent-router
+    disabledTools:
+      - tool-fs
+      - tool-subagent

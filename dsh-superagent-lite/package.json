@@ -1,0 +1,20 @@
+{
+  "name": "dsh-superagent-lite",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "薄编排层：Source 适配 · intake 幂等 · ticket stage · effects 队列 · outbox · executor 适配（K01–K14）",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./presets/*": "./presets/*"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

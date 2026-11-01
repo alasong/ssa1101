@@ -1,0 +1,6 @@
+# 坏夹具（T13 破坏实验）：disabledTools 清空 = 工具加满。
+# T13 对同一判据跑这份副本，必须报违规；真实 presets/ 不许被改。
+- id: agent-preset
+  config:
+    name: superagent-router
+    disabledTools: []
