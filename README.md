@@ -46,6 +46,21 @@ node --test tests/unit/   # 118 条单测
 
 没有 HTTP 入口，也不打算有：写者只有 kaa，`src/channel/local.ts` 里连 HTTP 客户端都没有（结构上做不到，不是靠约定）。
 
+## 网页控制台（下发任务 + 看 worker 路由）
+
+```bash
+cd dsh-superagent-lite
+node scripts/server.ts            # 默认 7788，--port 可改
+# 打开 http://127.0.0.1:7788
+```
+
+页面上能做的：输入框下发需求、看工单表（**阶段 / 线程 / 会话 / 槽位**）、看「需要人处理」、
+点「批准」结束工单、看最近事件流。数据来自 `/api/state`，页面每 1.5 秒拉一次；
+另外还有 `POST /api/task` 与 `POST /api/approve` 两个接口，脚本里也能直接调。
+
+会话仍是**假工厂**（只生成 sessionId 与目录），所以「会话」那列是编排层真实派发出来的
+sessionId，不是真的 dsh 会话——真接线见 `src/app/executor.ts` 的 `SessionFactory`。
+
 ## 装进 dsh（bundle 补丁层）
 
 包自己声明是 bundle（`package.json` 的 `dsh.bundle.patch`），装法：
