@@ -32,8 +32,19 @@ node --test tests/unit/   # 118 条单测
 | `node scripts/cli.ts panel` | 只显示**需要人**的事（没有就空） |
 | `node scripts/cli.ts board` | 全看板（7 个 stage） |
 | `node scripts/cli.ts approve t1` | 人批准 → 结束工单（kaa 记账 + 回写） |
+| `node scripts/cli.ts pull-tree` | **从目标树拉任务**（ready 叶子 → 事件），不用敲 put |
 
 `put` 之后要 `tick`（或先起 `run`）才会变成工单。
+
+### 任务从哪来（三条入口）
+
+1. **人敲命令**：`put "…"`（最直接）
+2. **目标树**：`pull-tree`——读 `~/.dsh/storages/goal_tree.json`，把「pending + 没有孩子 + 依赖都完成」的叶子
+   翻成事件；幂等键 `node:<id>:<revision>`，同 revision 重复拉只会被判重复，不会重复建单。
+   `--session <id>` 指定哪棵树（默认取最近更新的那棵），`--tree <json>` 指定别的文件。
+3. **会话里跟我说**：我替你敲上面任一命令。
+
+没有 HTTP 入口，也不打算有：写者只有 kaa，`src/channel/local.ts` 里连 HTTP 客户端都没有（结构上做不到，不是靠约定）。
 
 ## 装进 dsh（bundle 补丁层）
 

@@ -8,16 +8,20 @@
  *   node scripts/cli.ts board                         打印全 7 个 stage
  *   node scripts/cli.ts tickets                       列开着 的工单
  *   node scripts/cli.ts approve <ticketId>             人批准 → 结束工单（kaa 记账 + 回写）
+ *   node scripts/cli.ts pull-tree [--session <id>] [--tree <json>]
+ *                                                     从目标树拉 ready 叶子投成需求（不敲命令也能下任务）
  *   node scripts/cli.ts watch                         读一条 stdin 行就投一条需求（手工灌）
  *
  * 库默认 ~/.dsh/superagent-lite/sa.db，可用 SA_DB 覆盖。
  * kaa / 会话 / 回写在这个壳里都是**桩**（只打印），真接线见 src/app/kaa.ts 与 executor 的 factory。
  */
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { startRuntime } from '../src/app/runtime.ts';
 import { manualEvent } from '../src/sources/manual.ts';
+import { GoalTreeSource } from '../src/sources/goal-tree.ts';
+import type { GoalNode, TreeResponse } from '../src/sources/goal-tree.ts';
 import { renderBoard, renderPanel } from '../src/panel/view.ts';
 
 const dbPath = process.env.SA_DB ?? join(homedir(), '.dsh', 'superagent-lite', 'sa.db');
@@ -110,8 +114,33 @@ try {
       await tickOnce();
       break;
     }
+    case 'pull-tree': {
+      // 不敲命令的那条入口：读 goal-tree 存储 → ready 叶子 → 事件。幂等键 node:<id>:<revision>，
+      // 同一个 revision 重复拉只会被 Engine 判 duplicate，不会重复建单。
+      const at = (f: string) => {
+        const i = rest.indexOf(f);
+        return i >= 0 ? rest[i + 1] : undefined;
+      };
+      const treePath = at('--tree') ?? join(homedir(), '.dsh', 'storages', 'goal_tree.json');
+      const wantSession = at('--session');
+      const raw = JSON.parse(readFileSync(treePath, 'utf8'));
+      const sessions: Record<string, { revision: number; updatedAt?: string; nodes: GoalNode[] }> = raw.tables.sessions;
+      const id =
+        wantSession ??
+        Object.entries(sessions).sort(([, a], [, b]) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0][0];
+      const sess = sessions[id];
+      if (sess === undefined) throw new Error(`目标树里没有会话 ${id}（可用：${Object.keys(sessions).join(', ')}）`);
+      const tree: TreeResponse = { revision: Number(sess.revision), nodes: sess.nodes };
+      const src = new GoalTreeSource(async () => tree, { intervalMs: 0 });
+      const events = await src.poll(Date.now());
+      for (const e of events) rt.repo.events.put(e);
+      say(`目标树 ${id}（revision ${tree.revision}）：ready 叶子 ${events.length} 个 → 已投事件`);
+      for (const e of events) say(`  + ${e.threadKey}  ${e.text}`);
+      if (events.length > 0) await tickOnce();
+      break;
+    }
     default:
-      say('用法：put <文本> | tick | run [--interval ms] | panel | board | tickets | approve <id> | watch');
+      say('用法：put <文本> | pull-tree [--session id] | tick | run [--interval ms] | panel | board | tickets | approve <id> | watch');
   }
 } finally {
   rt.close();
