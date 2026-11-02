@@ -4,7 +4,7 @@
  *   node scripts/server.ts [--port 7788]
  *   打开 http://127.0.0.1:7788
  *
- * 页面每 1.5 秒拉一次 /api/state；下发任务走 POST /api/task；批准走 POST /api/approve。
+ * 页面每 1.5 秒拉一次 /api/state；下发走 POST /api/task；取消走 /api/cancel；重跑走 /api/retry。
  *
  * 会话是**真的**：每个 assignment spawn 一个 `dsh --profile <p> --json <任务>`，
  * ndjson 逐行落盘到 assignment 目录（见 src/app/dsh-session.ts）。
@@ -148,6 +148,16 @@ const WHY: Record<string, string> = {
   'person/blocked': 'worker 卡住了，等你解除',
 };
 
+/** 一次运行的"结论"：答复 > 错误 > 退出码。返回 null 表示还没跑完、什么都还没有。 */
+const outcome = (run: DshRunRecord | undefined): string | null => {
+  if (run === undefined) return null;
+  if ((run.finalText ?? '') !== '') return run.finalText;
+  if ((run.error ?? '') !== '') return run.error;
+  if (run.exitCode !== null && run.exitCode !== 0) return `退出码 ${run.exitCode}（无 final）`;
+  if (run.state === 'done') return '（完成但没有 final 事件）';
+  return null;
+};
+
 /** 一张单在页面上要能看懂的全部信息：批什么、谁在做、做出什么、为什么找你要决定。 */
 const describe = (t: { id: string; threadKey: string; stage?: string; assignment?: { state?: string; sessionId?: string; dir?: string } }) => {
   const run = workerOf(t.id);
@@ -162,10 +172,21 @@ const describe = (t: { id: string; threadKey: string; stage?: string; assignment
       : never
         ? '还没跑起来（重启后中断）：可以「结束」它再重新下发'
         : '');
+  // 委托的阶段链：每一步都对得上库里的一个事实，不做"预计进度"这种编造
+  const steps = [
+    { label: '收到需求', done: true, note: t.threadKey },
+    { label: 'Gate 准入', done: true, note: 'auto' },
+    { label: '建工单', done: true, note: t.id },
+    { label: '占槽派发', done: t.assignment?.state === 'running' || run !== undefined, note: t.assignment?.state ?? '未派' },
+    { label: 'worker 执行', done: run !== undefined, note: run === undefined ? '还没起' : `${run.dshSessionId ?? '起会话中'} · ${run.lines} 行` },
+    { label: '出结果', done: outcome(run) !== null, note: outcome(run) ?? '还没结果' },
+    { label: '结束', done: t.state === 'ended', note: t.state === 'ended' ? '已结束' : '未结束' },
+  ];
   return {
     id: t.id,
     text,
     stage: t.stage ?? '',
+    steps,
     why,
     needsHuman: why !== '',
     thread: t.threadKey,
@@ -174,7 +195,7 @@ const describe = (t: { id: string; threadKey: string; stage?: string; assignment
     workerSession: run?.dshSessionId ?? '—',
     dir: t.assignment?.dir ?? run?.dir ?? '—',
     lines: run?.lines ?? 0,
-    result: run?.finalText !== null && run?.finalText !== undefined && run.finalText !== '' ? run.finalText : (run?.error ?? null),
+    result: outcome(run),
     exitCode: run?.exitCode ?? null,
   };
 };
@@ -183,7 +204,16 @@ const state = () => {
   const open = rt.repo.tickets.open();
   const done = rt.repo.tickets.all().filter((t) => t.state === 'ended');
   const rows = open.map(describe);
+  const withRun = rows.filter((r) => r.worker !== '—').length;
   return {
+    flow: {
+      events: rt.repo.events.pending(500).length + rows.length + done.length,
+      tickets: rows.length + done.length,
+      dispatched: withRun,
+      running: rows.filter((r) => r.worker === 'running').length,
+      results: rows.concat(done.map(describe)).filter((r) => typeof r.result === 'string' && r.result !== '').length,
+      ended: done.length,
+    },
     tickets: rows,
     ended: done.length,
     endedRecent: done.slice(-8).reverse().map((t) => {
@@ -247,14 +277,31 @@ const server = createServer((req, res) => {
       await rt.tick();
       return json(200, state());
     }
-    if (req.method === 'POST' && url.pathname === '/api/approve') {
+    // 取消：停 worker + 结束工单（原来叫「批准」，名不副实）
+    if (req.method === 'POST' && url.pathname === '/api/cancel') {
       const b = await body();
       const t = rt.repo.tickets.get(String(b.id ?? ''));
       if (t === undefined) return json(404, { error: '没有这张工单' });
       // 先停会话释放槽位，再结束工单；否则 approve 之后槽位会一直占着（每批准一个漏一个）
       if (t.assignment !== undefined) await executor.stop(t, t.assignment, 'approved');
       rt.engine.close(t);
-      log(`人批准 ${t.id}（会话已停、槽位已释放）`);
+      log(`人取消 ${t.id}（会话已停、槽位已释放）`);
+      await rt.tick();
+      return json(200, state());
+    }
+    // 重跑：把原任务按原样再下发一次（新 event → 新工单 → 新 worker），旧单先结束
+    if (req.method === 'POST' && url.pathname === '/api/retry') {
+      const b = await body();
+      const t = rt.repo.tickets.get(String(b.id ?? ''));
+      if (t === undefined) return json(404, { error: '没有这张工单' });
+      const text = prompts.get(t.threadKey) ?? rt.repo.events.textByThread(t.threadKey);
+      if (text === undefined || text === '') return json(400, { error: '找不到这张单的任务原文，无法重跑' });
+      if (t.assignment !== undefined) await executor.stop(t, t.assignment, 'retry');
+      rt.engine.close(t);
+      const ev = manualEvent({ id: `m-${Date.now()}`, text }, Date.now());
+      prompts.set(ev.threadKey, text);
+      rt.repo.events.put(ev);
+      log(`重跑 ${t.id}：${text}`);
       await rt.tick();
       return json(200, state());
     }

@@ -55,6 +55,13 @@ else
   fail=1; printf 'PAGE | FAIL | 见 node scripts/check-page.ts\n'
 fi
 
+# 页面渲染：光"能解析"不够，得真把数据画出来（白屏在浏览器里也没有报错）
+if node scripts/check-page-render.ts >/tmp/verify-render.log 2>&1; then
+  printf 'PAGE-RENDER | PASS | %s\n' "$(sed -n 's/^页面渲染 OK：//p' /tmp/verify-render.log | head -1)"
+else
+  fail=1; printf 'PAGE-RENDER | FAIL | 见 node scripts/check-page-render.ts\n'
+fi
+
 echo "exit code: $fail"
 if [ "$fail" -ne 0 ]; then
   echo "--- node --test 尾部（诊断用）---" >&2
