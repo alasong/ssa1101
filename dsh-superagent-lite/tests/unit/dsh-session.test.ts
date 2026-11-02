@@ -151,11 +151,50 @@ test('4. 人 stop → stopped（不是 done），且真的 kill 了子进程', a
   rmSync(dir, { recursive: true, force: true });
 });
 
-test('5. readLine：只认 session 与 final，坏 JSON 与其它类型都不抛', () => {
+test('5. readLine：认 session / final / turn_end 的失败原因，坏 JSON 与其它类型都不抛', () => {
   assert.deepEqual(readLine(JSON.stringify({ type: 'session', sessionId: 'a' })), { sessionId: 'a' });
   assert.deepEqual(readLine(JSON.stringify({ type: 'final', text: '好' })), { finalText: '好' });
   assert.deepEqual(readLine('not json'), {});
   assert.deepEqual(readLine('{broken'), {});
   assert.deepEqual(readLine(JSON.stringify({ type: 'status', phase: 'x' })), {});
   assert.deepEqual(readLine(JSON.stringify({ type: 'session' })), {}, 'sessionId 不是字符串就不认');
+  // 失败原因就在这一行：不认它，worker 就只剩一个"退出码 1"，查不出为什么
+  assert.deepEqual(
+    readLine(JSON.stringify({
+      type: 'status',
+      phase: 'turn_end',
+      reason: { kind: 'error', error: { message: 'AUTH 401: key invalid' } },
+    })),
+    { error: 'AUTH 401: key invalid' },
+  );
+  assert.deepEqual(readLine(JSON.stringify({ type: 'status', phase: 'turn_end', reason: { kind: 'completed' } })), {});
+});
+
+test('6. turn_end 报错 → 原因进 record、进 worker.json 的 error、也进 result.md', async () => {
+  const dir = tmpDir();
+  const child = fakeChild();
+  const seen: string[] = [];
+  const f = createDshSessionFactory({
+    spawn: (() => child as never) as never,
+    onEnd: (r) => seen.push(String(r.error)),
+  });
+  await f.start({ ticketId: 't6', agentPreset: 'w', dir, firstMessage: 'x' });
+  child.stdout.write(`${JSON.stringify({ type: 'session', sessionId: 's6' })}\n`);
+  child.stdout.write(`${JSON.stringify({
+    type: 'status',
+    phase: 'turn_end',
+    reason: { kind: 'error', error: { message: 'AUTH 401: Authentication Fails' } },
+  })}\n`);
+  await tick();
+  child.stdout.write(`${JSON.stringify({ type: 'final', text: '' })}\n`);
+  child.emit('close', 1);
+  await settle(() => f.snapshot('t6'));
+  const r = f.snapshot('t6');
+  assert.equal(r?.state, 'failed');
+  assert.match(String(r?.error), /AUTH 401/, '失败原因必须被记下来，否则页面只能显示退出码');
+  assert.deepEqual(seen, ['AUTH 401: Authentication Fails'], 'onEnd 收到的记录里也要有原因');
+  const md = readFileSync(`${dir}/result.md`, 'utf8');
+  assert.match(md, /失败原因: AUTH 401/);
+  assert.match(md, /exit=1/);
+  rmSync(dir, { recursive: true, force: true });
 });

@@ -48,6 +48,13 @@ for n in 1 2 3 4 5; do
   printf '%s | %s | %s\n' "$id" "$status" "$detail"
 done
 
+# worker 凭据层：账户路由没接回来，每一单都会死在 401 上（页面只显示「退出码 1」）
+if node scripts/check-worker-auth.ts --selftest >/tmp/verify-auth-self.log 2>&1 && node scripts/check-worker-auth.ts >/tmp/verify-auth.log 2>&1; then
+  printf 'WORKER-AUTH | PASS | %s\n' "$(sed -n 's/^worker 凭据层 OK：//p' /tmp/verify-auth.log | head -1)"
+else
+  fail=1; printf 'WORKER-AUTH | FAIL | 见 node scripts/check-worker-auth.ts（含 --selftest）\n'
+fi
+
 # 控制台页面脚本（经典脚本可解析 / 入口挂在 window 上 / 按钮有绑定）——它坏了页面按钮就是死的
 if node scripts/check-page.ts >/tmp/verify-page.log 2>&1; then
   printf 'PAGE | PASS | %s\n' "$(sed -n 's/^页面脚本 OK：//p' /tmp/verify-page.log | head -1)"

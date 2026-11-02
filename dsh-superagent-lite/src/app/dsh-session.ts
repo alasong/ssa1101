@@ -68,7 +68,7 @@ export interface DshSessionDeps {
 }
 
 /** 一行 ndjson → 关心的字段。解析失败不算错：非 JSON 行只落盘、不解释。 */
-export function readLine(line: string): { sessionId?: string; finalText?: string } {
+export function readLine(line: string): { sessionId?: string; finalText?: string; error?: string } {
   const s = line.trim();
   if (s === '' || s[0] !== '{') return {};
   let v: unknown;
@@ -79,9 +79,19 @@ export function readLine(line: string): { sessionId?: string; finalText?: string
   }
   if (v === null || typeof v !== 'object') return {};
   const o = v as Record<string, unknown>;
-  const out: { sessionId?: string; finalText?: string } = {};
+  const out: { sessionId?: string; finalText?: string; error?: string } = {};
   if (o.type === 'session' && typeof o.sessionId === 'string') out.sessionId = o.sessionId;
   if (o.type === 'final' && typeof o.text === 'string') out.finalText = o.text;
+  // 失败原因来自 `turn_end.reason`（如 `{"kind":"error","error":{"message":"…AUTH 401…"}}`）。
+  // 不认这一条时，worker.json 里 error 永远是 null，页面只能显示「退出码 1」，等于没原因。
+  const reason = o.reason as { kind?: unknown; error?: { message?: unknown } } | undefined;
+  if (o.type === 'status' && reason?.kind === 'error' && typeof reason.error?.message === 'string') {
+    out.error = reason.error.message;
+  }
+  if (o.type === 'error') {
+    const direct = (o.error as { message?: unknown } | undefined)?.message ?? o.message;
+    if (typeof direct === 'string') out.error = direct;
+  }
   return out;
 }
 
@@ -108,6 +118,7 @@ export function createDshSessionFactory(deps: DshSessionDeps = {}) {
     const parsed = readLine(line);
     if (parsed.sessionId !== undefined) r.dshSessionId = parsed.sessionId;
     if (parsed.finalText !== undefined) r.finalText = parsed.finalText;
+    if (parsed.error !== undefined && r.error === null) r.error = parsed.error;
   };
 
   const finish = (r: DshRunRecord, state: DshRunRecord['state'], exitCode: number | null): void => {
@@ -115,9 +126,15 @@ export function createDshSessionFactory(deps: DshSessionDeps = {}) {
     r.state = state;
     r.exitCode = exitCode;
     r.endedAt = Date.now();
-    // 产物：最终答复落盘，没有答复也写一行说明（"没产出"要能被看见，不能静默）
+    // 产物：最终答复落盘；没有答复时把失败原因写进去——"退出码 1 但不知道为什么"是最难查的一种
     try {
-      writeFileSync(join(r.dir, 'result.md'), r.finalText ?? `（本次运行没有 final 事件）\nexit=${String(exitCode)}\n`);
+      const missing =
+        r.error === null
+          ? `（本次运行没有 final 事件）\nexit=${String(exitCode)}\n`
+          : `（本次运行没有 final 事件）\n失败原因: ${r.error}\nexit=${String(exitCode)}\n`;
+      // 空答复同样算"没产出"：`final` 的 text 是 '' 时 ?? 不会落到说明上，会写出一个空文件
+      const answered = r.finalText !== null && r.finalText.trim() !== '';
+      writeFileSync(join(r.dir, 'result.md'), answered ? (r.finalText as string) : missing);
     } catch {
       /* 目录没了就算了，不影响状态 */
     }
