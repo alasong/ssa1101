@@ -42,18 +42,19 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
   <button id="send">下发</button></div>
   <p class="muted">回车也可提交 · 走 manual 源 → 事件 → Gate → 工单</p>
   <div id="err"></div>
-  <h2 style="margin-top:18px">需要人处理</h2>
+  <h2 style="margin-top:18px">需要你处理</h2>
   <pre id="panel">（空）</pre>
  </section>
  <section>
-  <h2>Worker 路由</h2>
+  <h2>进行中（看它是什么、为什么找你）</h2>
   <div class="kpi" id="kpi"></div>
-  <table><thead><tr><th>工单</th><th>阶段</th><th>worker</th><th>worker 会话</th><th>日志行</th><th></th></tr></thead>
-  <tbody id="tickets"><tr><td colspan="6" class="empty">还没有工单</td></tr></tbody></table>
+  <table><thead><tr><th>工单</th><th>任务原文</th><th>worker</th><th>为什么找你</th><th></th></tr></thead>
+  <tbody id="tickets"><tr><td colspan="5" class="empty">还没有工单</td></tr></tbody></table>
   <h2 style="margin-top:18px">Worker 详情（点「详情」看它跑了什么）</h2>
   <pre id="detail">（还没选工单）</pre>
-  <h2 style="margin-top:18px">已结束（最近 5 个）</h2>
-  <pre id="ended">（还没有）</pre>
+  <h2 style="margin-top:18px">已结束（含结果）</h2>
+  <table><thead><tr><th>工单</th><th>任务原文</th><th>worker</th><th>结果</th><th></th></tr></thead>
+  <tbody id="ended"><tr><td colspan="5" class="empty">还没有结束的工单</td></tr></tbody></table>
   <h2 style="margin-top:18px">最近事件</h2>
   <pre id="log">—</pre>
  </section>
@@ -83,22 +84,34 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
       ' · 待处理事件 ' + s.pendingEvents + ' · 到期副作用 ' + s.dueEffects;
     $('panel').textContent = s.panel || '（空）';
     $('log').textContent = s.events.length ? s.events.join('\\n') : '—';
-    var needHuman = s.panel ? s.panel.split('\\n').filter(function (l) { return l.trim().indexOf('- ') === 0; }).length : 0;
-    $('kpi').innerHTML = '<span>进行中 <b>' + s.tickets.length + '</b></span><span>需要人 <b>' + needHuman +
-      '</b></span><span>已结束 <b>' + s.ended + '</b></span>';
-    $('ended').textContent = s.endedRecent.length ? s.endedRecent.join('\\n') : '（还没有）';
+    var needHuman = s.tickets.filter(function (t) { return t.needsHuman; }).length;
+    $('kpi').innerHTML = '<span>进行中 <b>' + s.tickets.length + '</b></span><span>等你处理 <b>' + needHuman +
+      '</b></span><span>已结束 <b>' + s.ended + '</b></span>' +
+      (s.workerMode === 'fake' ? '<span>（假 worker：不会真跑）</span>' : '');
     var tb = $('tickets');
     if (!s.tickets.length) {
-      tb.innerHTML = '<tr><td colspan="6" class="empty">还没有工单</td></tr>';
-      return;
+      tb.innerHTML = '<tr><td colspan="5" class="empty">还没有工单</td></tr>';
+    } else {
+      tb.innerHTML = s.tickets.map(function (t) {
+        return '<tr><td><code>' + esc(t.id) + '</code><div class="muted">' + esc(t.stage) + '</div></td>' +
+          '<td>' + esc(t.text) + '</td>' +
+          '<td>' + esc(t.worker) + '<div class="muted">' + esc(t.workerSession) + '</div></td>' +
+          '<td>' + (t.why ? esc(t.why) : '<span class="muted">不需要你</span>') + '</td>' +
+          '<td><button class="ghost" data-detail="' + esc(t.id) + '">详情</button>' +
+          '<button class="ghost" data-approve="' + esc(t.id) + '" title="结束这张单：停掉它的 worker 并释放槽位。不是「批准它开始」，它已经在跑了">结束</button></td></tr>';
+      }).join('');
     }
-    tb.innerHTML = s.tickets.map(function (t) {
-      return '<tr><td><code>' + esc(t.id) + '</code></td><td>' + esc(t.stage) +
-        '</td><td><code>' + esc(t.session) + '</code> ' + esc(t.worker) +
-        '</td><td><code>' + esc(t.workerSession) + '</code></td><td>' + esc(t.lines) +
-        '</td><td><button class="ghost" data-detail="' + esc(t.id) + '">详情</button>' +
-        '<button class="ghost" data-approve="' + esc(t.id) + '">批准</button></td></tr>';
-    }).join('');
+    var eb = $('ended');
+    if (!eb) return;
+    if (!s.endedRecent.length) {
+      eb.innerHTML = '<tr><td colspan="5" class="empty">还没有结束的工单</td></tr>';
+    } else {
+      eb.innerHTML = s.endedRecent.map(function (e) {
+        var r = e.result ? String(e.result).slice(0, 160) : '（这一单结束时没有执行记录）';
+        return '<tr><td><code>' + esc(e.id) + '</code></td><td>' + esc(e.text) + '</td><td>' + esc(e.worker) +
+          '</td><td>' + esc(r) + '</td><td><button class="ghost" data-detail="' + esc(e.id) + '">详情</button></td></tr>';
+      }).join('');
+    }
   }
 
   var selected = null;

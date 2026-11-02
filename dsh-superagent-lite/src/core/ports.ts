@@ -51,6 +51,8 @@ export interface Repository {
     /** 幂等写：同一 external_id 重复 put 不新增行。 */
     put(e: Event): void;
     byExternalId(id: string): Event | undefined;
+    /** 该 thread 最近一条原文（页面显示「在批什么」用）。 */
+    textByThread(threadKey: string): string | undefined;
     /** 还没被 pass 处理过的事件（disposition='new'），有界读取。 */
     pending(limit: number): Event[];
     /** 标记处理结果，避免同一行被反复消费。 */

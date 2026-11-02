@@ -120,10 +120,6 @@ const rt = startRuntime({
   },
 });
 
-const endedLog: string[] = [];
-const endedCount = (): number => endedLog.length;
-const endedRecent = (): string[] => endedLog.slice(0, 5);
-
 /** 先看内存里的运行记录，再回落到 assignment 目录里的 worker.json（重启后仍可读）。 */
 const workerOf = (ticketId: string): DshRunRecord | undefined => {
   const live = dshFactory.snapshot(ticketId);
@@ -134,34 +130,71 @@ const workerOf = (ticketId: string): DshRunRecord | undefined => {
   const file = join(dir, 'worker.json');
   if (!existsSync(file)) return undefined;
   try {
-    return JSON.parse(readFileSync(file, 'utf8')) as DshRunRecord;
+    const rec = JSON.parse(readFileSync(file, 'utf8')) as DshRunRecord;
+    // 目录会随 ticket id 复用：记录里的 runId 必须等于这张单当前那个 assignment，
+    // 否则就是上一张同名工单留下的旧记录（实测：恢复旧库后 t2 读到了新跑的那次）
+    if (t?.assignment?.sessionId !== undefined && rec.runId !== t.assignment.sessionId) return undefined;
+    return rec;
   } catch {
     return undefined;
   }
 };
 
-const state = () => {
-  const tickets = rt.repo.tickets.open().map((t) => {
-    const run = workerOf(t.id);
-    return {
-      id: t.id,
-      stage: t.stage ?? '',
-      thread: t.threadKey,
-      assignment: t.assignment?.state ?? '—',
-      session: t.assignment?.sessionId ?? '—',
-      dir: t.assignment?.dir ?? '—',
-      worker: run?.state ?? '—',
-      workerSession: run?.dshSessionId ?? '—',
-      lines: run?.lines ?? 0,
-    };
-  });
-  const endedRows = rt.repo.atomic(() => 0);
-  void endedRows;
+/** stage → "为什么需要你"。空串表示不需要人。 */
+const WHY: Record<string, string> = {
+  'person/delivery': 'worker 说做完了，等你验收',
+  'person/answer': 'worker 在等你回答',
+  'person/review': 'worker 交了结果，等你审',
+  'person/blocked': 'worker 卡住了，等你解除',
+};
+
+/** 一张单在页面上要能看懂的全部信息：批什么、谁在做、做出什么、为什么找你要决定。 */
+const describe = (t: { id: string; threadKey: string; stage?: string; assignment?: { state?: string; sessionId?: string; dir?: string } }) => {
+  const run = workerOf(t.id);
+  const text = rt.repo.events.textByThread(t.threadKey) ?? '（库里找不到这条需求的原文）';
+  const failed = run?.state === 'failed';
+  // 四种"需要人"的来源，都要说清是哪种；否则页面上只剩一个按钮，人不知道该批什么
+  const never = run === undefined && t.assignment?.state !== 'running';
+  const why =
+    WHY[t.stage ?? ''] ??
+    (failed
+      ? 'worker 跑失败了：等你决定「结束」还是重新下发'
+      : never
+        ? '还没跑起来（重启后中断）：可以「结束」它再重新下发'
+        : '');
   return {
-    tickets,
-    ended: endedCount(),
-    endedRecent: endedRecent(),
-    panel: renderPanel(rt.repo.tickets.open()),
+    id: t.id,
+    text,
+    stage: t.stage ?? '',
+    why,
+    needsHuman: why !== '',
+    thread: t.threadKey,
+    assignment: t.assignment?.state ?? '—',
+    worker: run?.state ?? '—',
+    workerSession: run?.dshSessionId ?? '—',
+    dir: t.assignment?.dir ?? run?.dir ?? '—',
+    lines: run?.lines ?? 0,
+    result: run?.finalText !== null && run?.finalText !== undefined && run.finalText !== '' ? run.finalText : (run?.error ?? null),
+    exitCode: run?.exitCode ?? null,
+  };
+};
+
+const state = () => {
+  const open = rt.repo.tickets.open();
+  const done = rt.repo.tickets.all().filter((t) => t.state === 'ended');
+  const rows = open.map(describe);
+  return {
+    tickets: rows,
+    ended: done.length,
+    endedRecent: done.slice(-8).reverse().map((t) => {
+      const d = describe(t);
+      return { id: d.id, text: d.text, worker: d.worker, result: d.result };
+    }),
+    // 面板只放"需要人"的：带上原文与原因，否则人只看到一堆按钮不知道该批什么
+    panel: rows
+      .filter((r) => r.needsHuman)
+      .map((r) => `- ${r.id} · ${r.text} → ${r.why}`)
+      .join('\n'),
     slots: { used: slots.used, capacity: slots.capacity },
     live: executor.live,
     pendingEvents: rt.repo.events.pending(50).length,
@@ -221,7 +254,6 @@ const server = createServer((req, res) => {
       // 先停会话释放槽位，再结束工单；否则 approve 之后槽位会一直占着（每批准一个漏一个）
       if (t.assignment !== undefined) await executor.stop(t, t.assignment, 'approved');
       rt.engine.close(t);
-      endedLog.unshift(`${t.id} ${t.threadKey} @${new Date().toISOString().slice(11, 19)}`);
       log(`人批准 ${t.id}（会话已停、槽位已释放）`);
       await rt.tick();
       return json(200, state());

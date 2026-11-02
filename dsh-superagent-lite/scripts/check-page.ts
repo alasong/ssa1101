@@ -36,6 +36,13 @@ for (const fn of ['openWorker']) {
 }
 if (!js.includes(`data-detail`)) problems.push('工单行没有「详情」入口（data-detail），看不到 worker 跑了什么');
 if (!js.includes(`/api/worker?id=`)) problems.push('页面没有请求 /api/worker，详情无从取数');
+// 「批准」这个词让人以为要批一个动作；必须能看见批的是哪条需求、为什么找他
+// 前两条在 HTML 的表头里，最后一条在 JS 的按钮 title 里 —— 分开查，别用同一个串
+// 查「表头」整串，不能只查那四个字：那四个字在别处也出现过，那样门就会假绿（实测踩过）
+for (const needle of ['<th>任务原文</th>', '<th>为什么找你</th>']) {
+  if (!page.includes(needle)) problems.push(`工单表缺少 ${needle} 这一列，人看不懂自己在批什么`);
+}
+if (!js.includes('结束这张单')) problems.push('结束按钮没有说明它做什么（会让人以为是「批准开始」）');
 
 if (problems.length > 0) {
   console.error('页面脚本判红：');

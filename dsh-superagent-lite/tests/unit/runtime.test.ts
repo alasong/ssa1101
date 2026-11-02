@@ -281,3 +281,36 @@ test('7. 重启后发号续号：已结束的 t1 不被新工单覆盖', async (
   assert.equal(old?.state, 'ended', '旧的 t1 必须还是已结束');
   assert.equal(old?.threadKey, 'thread-old', '旧的 t1 不得被新工单的 threadKey 覆盖');
 });
+
+// ---------------------------------------------------------------------------
+// 8. 页面要能说「你在批什么」：原文按 thread 可读回，且重启后仍在
+// ---------------------------------------------------------------------------
+test('8. textByThread：按 thread 取最近一条原文，重开库仍在', async (t) => {
+  const file = tmpDb();
+  let rt: Runtime | undefined;
+  t.after(() => {
+    rt?.close();
+    removeDb(file);
+  });
+
+  rt = startRuntime({ dbPath: file, gate: allowGate(), now: () => 50_000 });
+  const e1 = { ...makeEvent('e1', 'ext-1', 50_000), text: '把按钮改成蓝色', threadKey: 'manual:m-1' };
+  const e2 = { ...makeEvent('e2', 'ext-2', 50_001), text: '再改成绿色', threadKey: 'manual:m-1' };
+  rt.repo.events.put(e1);
+  rt.repo.events.put(e2);
+
+  assert.equal(
+    rt.repo.events.textByThread('manual:m-1'),
+    '再改成绿色',
+    '同一 thread 取最近一条（页面显示的是"你现在在批什么"）',
+  );
+  assert.equal(rt.repo.events.textByThread('manual:nope'), undefined, '找不到就 undefined，不许编');
+
+  rt.close();
+  rt = startRuntime({ dbPath: file, gate: allowGate(), now: () => 60_000 });
+  assert.equal(
+    rt.repo.events.textByThread('manual:m-1'),
+    '再改成绿色',
+    '重启后仍能读到原文（页面不靠内存）',
+  );
+});

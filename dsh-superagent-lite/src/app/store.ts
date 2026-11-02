@@ -217,6 +217,13 @@ export function createRepository(db: DatabaseSync): Repository {
            VALUES(?,?,?,?,?,?,?, 'new') ON CONFLICT(external_id) DO NOTHING`,
         ).run(e.id, e.source, e.externalId, e.at, e.actor, e.text, e.threadKey);
       },
+      /** 按 thread 取最近一条原文：页面上「你在批什么」就靠它（重启后仍在）。 */
+      textByThread(threadKey) {
+        const r = db
+          .prepare(`SELECT text FROM event WHERE thread_key = ? ORDER BY at DESC, rowid DESC LIMIT 1`)
+          .get(threadKey) as any;
+        return r === undefined ? undefined : String(r.text);
+      },
       byExternalId(id) {
         const r = db.prepare('SELECT * FROM event WHERE external_id = ?').get(id) as any;
         return r === undefined ? undefined : (rowToEvent(r) as Event);

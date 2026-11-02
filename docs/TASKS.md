@@ -1,7 +1,7 @@
 # 开发任务分解（v1）
 
 **前置**：[DETAILED-DESIGN.md](DETAILED-DESIGN.md)（目录设计 §1、接口 §2、数据模型 §3、状态机 §4、验收 T01–T15 §8）。
-**口径**：14 个任务，行数合计 **1965 行 src（实测；设计期估 1,300，+51%）+ 500 行测试**，与详设 §1.3 模块表逐行对应（`check-delivery.py` 第 6 条判据机检这三个数一致）。
+**口径**：14 个任务，行数合计 **1974 行 src（实测；设计期估 1,300，+51%）+ 500 行测试**，与详设 §1.3 模块表逐行对应（`check-delivery.py` 第 6 条判据机检这三个数一致）。
 **与目标树同构**：每个任务 = 一个目标树节点；`依赖` 列 = `depends_on` 边。目标树是跨轮台账，本文件是给人看的同一份东西——两边不一致时以目标树为准并回改本文件。
 
 ---
@@ -12,8 +12,8 @@
 |---|---|---|---|---|---|---|
 | K01 | 骨架与 profile | `package.json` `cordis.patch.yml` `presets/` | 0 | — | `dsh --profile superagent --dump-config` 的插件计数 ≥1；删掉 bundle 行后计数为 0 | R20、R14、R16、R21 |
 | K02 | 纯函数域：模型与 stage | `src/core/model.ts` `src/core/stage.ts` | 157 | K01 | `node --test tests/unit/stage.test.ts` 全绿；把第 3 行条件改成恒真，T05 必红 | R05 |
-| K03 | 纯函数域：端口与引擎 | `src/core/ports.ts` `src/core/engine.ts` | 287 | K02 | `node --test tests/unit/engine.test.ts`；去掉 intake 的 external_id 去重，T01 必红 | R01、R05、R17、R22 |
-| K04 | 存储与 schema 版本 | `src/app/store.ts` | 344 | K01 | 把库版本号改成比代码新，启动必须拒绝（退出码非 0） | R18、R21 |
+| K03 | 纯函数域：端口与引擎 | `src/core/ports.ts` `src/core/engine.ts` | 289 | K02 | `node --test tests/unit/engine.test.ts`；去掉 intake 的 external_id 去重，T01 必红 | R01、R05、R17、R22 |
+| K04 | 存储与 schema 版本 | `src/app/store.ts` | 351 | K01 | 把库版本号改成比代码新，启动必须拒绝（退出码非 0） | R18、R21 |
 | K05 | 副作用队列 | `src/app/effects.ts` | 114 | K04 | 写一行 effect 后 `kill -9`，重启该行被执行且只一次（T08） | R08、R09 |
 | K06 | 组合根与 pass 循环 | `src/index.ts` `src/app/runtime.ts` | 135 | K03、K05 | 停掉 pass，event 停在 pending 不被消费 | R12、R02 |
 | K07 | 执行器适配 | `src/app/executor.ts` `src/app/dsh-session.ts` | 403 | K06 | 两 ticket 的 session id 与目录互不相同（T06）；满槽时人的消息 5 秒内投达（T10） | R06、R10 |
@@ -25,7 +25,7 @@
 | K13 | 验收测试 T01–T15 | `tests/unit/*` `tests/integration/*` `tests/fixtures/*` | 500 | K07–K12 | `bash scripts/verify.sh` 全绿；把某角色工具加满，预算测试必须红（T13） | R19 |
 | K14 | 端到端与崩溃实测 | `scripts/verify.sh` `tests/integration/e2e.test.ts` | 0 | K13 | manual 触发一路跑到 treeWrite，全部落库；中途 `kill -9` 后重启不重复执行 | R09、R18 |
 
-**行数口径**：K13 的 500 行是测试，不计入 src 的 1965；K01、K14 只产出配置与编排脚本，记 0（不虚报）。
+**行数口径**：K13 的 500 行是测试，不计入 src 的 1974；K01、K14 只产出配置与编排脚本，记 0（不虚报）。
 
 ---
 
@@ -109,12 +109,12 @@ manual 触发 → event → ticket → session → report → kaa 桩 → treeWr
 
 **为什么单列一节**：人打开面板想知道的是“哪个大块功能到什么程度、哪块卡住”，不是“第 14 个任务做完没”。任务表是执行维度，功能块是汇报维度，依赖层是诊断维度——三个维度，三份读数，别互相冒充。
 
-**归组（14 个任务，无遗漏无重复，行数和 = 1965 实测）**：
+**归组（14 个任务，无遗漏无重复，行数和 = 1974 实测）**：
 
 | 功能块 | 任务 | 代码行 | 完成判据（一句话能否说出口） |
 |---|---|---|---|
 | 骨架与配置 | K01 | 0 | 插件能在 `superagent` profile 里被加载 |
-| 判定与工单内核 | K02 K03 K04 K05 K11 | 957 | 一条 ticket 能走完 7 行 stage 判定，且 mandate 可读回 |
+| 判定与工单内核 | K02 K03 K04 K05 K11 | 966 | 一条 ticket 能走完 7 行 stage 判定，且 mandate 可读回 |
 | 会话执行与恢复 | K06 K07 | 538 | `kill -9` 后重启能续跑，外部动作只发生一次 |
 | 触发与出站 | K08 K09 K10 | 417 | 同 revision 只进一次；回写经 kaa 而非直接 POST |
 | 观测与验收 | K12（+ K13 500 行测试、K14 编排） | 53 | 15 条测试全绿，且面板能看出每块状态 |
@@ -128,7 +128,7 @@ manual 触发 → event → ticket → session → report → kaa 桩 → treeWr
 
 **两个必须分开显示的读数**：
 
-1. **投入量**：判定与工单内核占 **49%** 的 src（957/1965）。按任务数算进度会骗人——5/14 看着 36%，实际一半多的活在这块。
+1. **投入量**：判定与工单内核占 **49%** 的 src（966/1974）。按任务数算进度会骗人——5/14 看着 36%，实际一半多的活在这块。
 2. **阻塞度**：骨架块 **0 行代码，却挡住全部 13 个任务**（它是依赖图里唯一入度为 0 的块）。所以“骨架 0% 且没动静”不是没事，是全线卡住。只显示投入量会把这种块画成“无感”。
 
 **块完成的规矩**：块内叶子全 `done` **不等于**块完成。块必须有自己的集成判据（上表第四列），且 `done` 由人确认——否则会出现五条进度条 100%、系统跑不起来。K13/K14 干的就是这个。
