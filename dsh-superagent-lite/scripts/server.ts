@@ -212,6 +212,9 @@ const describe = (t: { id: string; threadKey: string; stage?: string; createdAt?
     lines: run?.lines ?? 0,
     result: outcome(run),
     exitCode: run?.exitCode ?? null,
+    // 真实时间戳（来自 worker.json，重启后仍在）：页面用它算「跑了多久」，不用自己编
+    startedAt: run?.startedAt ?? null,
+    endedAt: run?.endedAt ?? null,
   };
 };
 
@@ -231,9 +234,19 @@ const state = () => {
     },
     tickets: rows,
     ended: done.length,
-    endedRecent: done.slice(-8).reverse().map((t) => {
+    endedTotal: done.length,
+    // 给足量（上限 200）而不是只给 8 条：页面用「显示更多」按需展开，
+    // 只给 8 条的话，第 9 条以前的结果在界面上根本找不到（除非去翻库）
+    endedRecent: done.slice(-200).reverse().map((t) => {
       const d = describe(t);
-      return { id: d.id, text: d.text, worker: d.worker, result: d.result };
+      return {
+        id: d.id,
+        text: d.text,
+        worker: d.worker,
+        result: d.result,
+        startedAt: d.startedAt,
+        endedAt: d.endedAt,
+      };
     }),
     // 面板只放"需要人"的：带上原文与原因，否则人只看到一堆按钮不知道该批什么
     panel: rows

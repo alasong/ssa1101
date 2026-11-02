@@ -73,9 +73,25 @@ for (const [needle, why] of [
   ['e.metaKey || e.ctrlKey', '键盘：⌘/Ctrl+Enter 下发'],
   ["e.key === '/'", '键盘：/ 聚焦输入框'],
   ["e.key === 'Escape'", '键盘：Esc 收起详情/清空搜索'],
+  ["e.key === 'ArrowDown'", '键盘：↑/↓ 切换工单'],
+  ['function moveSelection(', '上下键没有「换单」实现，按了也没反应'],
 ]) {
   if (!js.includes(needle)) problems.push(`缺少 ${needle}（${why}）`);
 }
+// ⑧b 已结束表：列数必须与空态 colspan 一致（不一致在浏览器里就是错位的表）
+{
+  const t = /<table><thead><tr>(.*?)<\/tr><\/thead>\s*<tbody id="ended"><tr><td colspan="(\d+)"/.exec(page);
+  if (t === null) problems.push('已结束表的表头/空态结构没找到，无法核对列数');
+  else {
+    const cols = (t[1].match(/<th>/g) ?? []).length;
+    if (String(cols) !== t[2]) problems.push(`已结束表头 ${cols} 列，空态 colspan=${t[2]}：列数不一致`);
+    if (!t[1].includes('<th>耗时</th>')) problems.push('已结束表没有「耗时」列：跑了多久看不出来');
+  }
+  if (!page.includes('id="moreEnded"')) problems.push('已结束没有「显示更多」：超过 8 条就再也看不到');
+  if (!page.includes('@media (max-width: 900px)')) problems.push('没有窄屏规则：两栏并排会把表格挤成竖条');
+  if (!js.includes('function fmtDur(')) problems.push('没有耗时格式化函数，耗时只能靠人算');
+}
+
 // ⑨ 数据没变就不重画（整表 + 详情面板 + 选中行三处都要判）
 if (!js.includes('j !== lastJson')) problems.push('轮询没有「数据没变就不重画」，每 1.5 秒冲掉选中与滚动位置');
 if (!js.includes("$('detail').textContent !== text")) problems.push('详情面板每轮都重写，正在选中的日志会被清掉');

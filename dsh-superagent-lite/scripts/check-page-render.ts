@@ -121,10 +121,19 @@ const state = {
       assignment: 'running',
     },
   ],
-  ended: 2,
+  ended: 10,
+  endedTotal: 10,
   endedRecent: [
-    { id: 't1', text: '页面测试：把按钮改成蓝色', worker: 'done', result: '已完成。'.repeat(60) },
-    { id: 't2', text: '短结果', worker: 'done', result: '好' },
+    { id: 't1', text: '页面测试：把按钮改成蓝色', worker: 'done', result: '已完成。'.repeat(60), startedAt: 1000, endedAt: 121000 },
+    { id: 't2', text: '短结果', worker: 'done', result: '好', startedAt: 2000, endedAt: 32000 },
+    { id: 't3b', text: '第三条', worker: 'done', result: '好', startedAt: 10000, endedAt: 40000 },
+    { id: 't4b', text: '第四条', worker: 'done', result: '好', startedAt: 10000, endedAt: 40000 },
+    { id: 't5b', text: '第五条', worker: 'done', result: '好', startedAt: 10000, endedAt: 40000 },
+    { id: 't6b', text: '第六条', worker: 'done', result: '好', startedAt: 10000, endedAt: 40000 },
+    { id: 't7b', text: '第七条', worker: 'done', result: '好', startedAt: 10000, endedAt: 40000 },
+    { id: 't8b', text: '第八条', worker: 'done', result: '好', startedAt: 10000, endedAt: 40000 },
+    { id: 't10', text: '第十条', worker: 'done', result: '好', startedAt: 10000, endedAt: 40000 },
+    { id: 't9b', text: '第九条', worker: 'done', result: '好', startedAt: 10000, endedAt: 40000 }
   ],
   panel: '- t9 · 把按钮改成蓝色 → worker 跑失败了',
   slots: { used: 1, capacity: 2 },
@@ -219,6 +228,14 @@ else {
   }
   const endedHtml = el('ended').innerHTML;
   if (!endedHtml.includes('data-expand')) problems.push('已结束里超长结果没有「展开」，只能看到前 160 字');
+  // 时间与耗时：从 startedAt/endedAt 算，不是编的（2 分钟 → "2 分 0 秒"）
+  if (!endedHtml.includes('2 分 0 秒')) problems.push('已结束没有「耗时」列，或耗时不按真实时间戳算');
+  if (!el('moreEnded').textContent.includes('显示更多（还有 2 条）')) {
+    problems.push(`「显示更多」没算对隐藏条数：${el('moreEnded').textContent}`);
+  }
+  if (!el('endedHint').textContent.includes('共 10 条')) problems.push('已结束没显示总条数');
+  // 默认只渲染 8 条：第 9/10 条要点「显示更多」才出现
+  if (endedHtml.includes('第十条')) problems.push('已结束一次全画了 10 条，超出默认 8 条还没翻页');
   if (!endedHtml.includes('data-copy')) problems.push('已结束里没有「复制结果」');
   if (!el('flow').innerHTML.includes('已派 worker')) problems.push('委托链路计数没渲染');
   // ⑤ 空态要指下一步
@@ -235,11 +252,29 @@ void (async () => {
     if (!el('detail').textContent.includes('w-t9-abc')) problems.push('#detail 里没写入 worker 记录');
     if (!el('detail').textContent.includes('AUTH 401')) problems.push('#detail 里没写入失败原因');
   }
-  if (!docHandlers.keydown) problems.push('没有注册键盘快捷方式（⌘/Ctrl+Enter、/、Esc）');
+  if (!docHandlers.keydown) problems.push('没有注册键盘快捷方式（⌘/Ctrl+Enter、/、Esc、↑/↓）');
+  else {
+    // ↑/↓ 必须真的换单：按一次 ArrowDown → 请求第一张可见单的 worker；再按一次 → 第二张
+    calls.length = 0;
+    win.__render(state);
+    const key = (k: string) => docHandlers.keydown({ key: k, target: { tagName: 'BODY' }, preventDefault() {} });
+    key('Escape'); // 先清掉上一段测试留下的选中（否则 ↓ 是从 t9 往下走，不是从第一张开始）
+    key('ArrowDown');
+    await new Promise((r) => setTimeout(r, 10));
+    if (!calls.some((c) => c.startsWith('/api/worker?id=t8'))) {
+      problems.push(`↓ 没有切到第一张可见单（t8），实际请求：${calls.join(',') || '（无）'}`);
+    }
+    calls.length = 0;
+    key('ArrowDown');
+    await new Promise((r) => setTimeout(r, 10));
+    if (!calls.some((c) => c.startsWith('/api/worker?id=t9'))) {
+      problems.push(`再按 ↓ 没有切到第二张（t9），实际请求：${calls.join(',') || '（无）'}`);
+    }
+  }
   if (problems.length > 0) {
     console.error('页面渲染判红：');
     for (const p of problems) console.error(`  - ${p}`);
     process.exit(1);
   }
-  console.log('页面渲染 OK：两行都画、需要处理的排前、搜索能筛、复制/展开/批量重跑都在、空态指下一步、详情真取 /api/worker');
+  console.log('页面渲染 OK：多行都画、需要处理的排前、搜索能筛、复制/展开/批量重跑都在、耗时按真实时间戳、已结束默认 8 条可「显示更多」、↑/↓ 真能换单、空态指下一步、详情真取 /api/worker');
 })();

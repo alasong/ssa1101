@@ -52,6 +52,13 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
  #note{color:#7ee787;font-size:12.5px;margin-top:8px;white-space:pre-wrap}
  #detail{background:#0f1115;border:1px solid #222731;border-radius:6px;padding:10px;max-height:300px;overflow:auto}
  .kbd{border:1px solid #333a46;border-radius:4px;padding:0 4px;font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#9fb0c8}
+ /* 窄屏（手机 / 半屏窗口）：两栏并排会把表格挤成竖条，改成单栏 + 表格可横向滚 */
+ @media (max-width: 900px){
+  main{grid-template-columns:1fr;padding:12px}
+  header{padding:12px}
+  section{overflow-x:auto}
+  table{min-width:640px}
+ }
 </style>
 <header><h1>superagent-lite 控制台</h1>
 <span class="muted" id="meta">连接中…</span></header>
@@ -95,12 +102,14 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
 
   <h2 style="margin-top:18px">④ worker 详情</h2>
   <div class="tools"><button class="ghost" id="copyDir">复制执行目录</button>
-  <span class="muted">Esc 收起详情 · 点某张单的「详情」看它在干什么</span></div>
+  <span class="muted">Esc 收起详情 · ↑/↓ 切换单子并直接看它的详情 · 也可以点「详情」</span></div>
   <pre id="detail">（点某张单的「详情」——会显示它的 dsh 会话 id、执行的命令、日志行数与最终结果）</pre>
 
   <h2 style="margin-top:18px">⑤ 已结束（含结果）</h2>
-  <table><thead><tr><th>工单</th><th>任务原文</th><th>worker</th><th>结果</th><th></th></tr></thead>
-  <tbody id="ended"><tr><td colspan="5" class="empty">还没有结束的工单。</td></tr></tbody></table>
+  <div class="tools"><button class="ghost" id="moreEnded">显示更多</button>
+  <span class="muted" id="endedHint"></span></div>
+  <table><thead><tr><th>工单</th><th>任务原文</th><th>worker</th><th>耗时</th><th>结果</th><th></th></tr></thead>
+  <tbody id="ended"><tr><td colspan="6" class="empty">还没有结束的工单。</td></tr></tbody></table>
 
   <h2 style="margin-top:18px">⑥ 最近事件</h2>
   <pre id="log">—</pre>
@@ -115,6 +124,8 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
   var lastJson = '';
   var selected = null;
   var expanded = {};
+  var visibleIds = [];   // 当前筛选后可见的工单顺序（↑/↓ 按它切换）
+  var endedShown = 8;
   var detailDir = '';
 
   function showErr(e) {
@@ -168,6 +179,23 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
     return hay.indexOf(f.q) >= 0;
   }
 
+  // 时间与耗时：都从服务端给的真实时间戳算（worker.json 里就有，重启后仍在），不编
+  function fmtTime(ms) {
+    if (!ms) return '—';
+    var d = new Date(ms);
+    var p = function (n) { return (n < 10 ? '0' : '') + n; };
+    return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+  }
+
+  function fmtDur(a, b) {
+    if (!a || !b) return '—';
+    var sec = Math.max(0, Math.round((b - a) / 1000));
+    if (sec < 60) return sec + ' 秒';
+    var min = Math.floor(sec / 60);
+    if (min < 60) return min + ' 分 ' + (sec % 60) + ' 秒';
+    return Math.floor(min / 60) + ' 小时 ' + (min % 60) + ' 分';
+  }
+
   function stepsHtml(steps) {
     if (!steps || !steps.length) return '<span class="muted">—</span>';
     var now = 0;
@@ -204,6 +232,7 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
     $('kpi').innerHTML = '<span>进行中 <b>' + all.length + '</b></span><span>等你处理 <b>' + needHuman +
       '</b></span><span>显示 <b>' + shown.length + '</b></span>';
 
+    visibleIds = shown.map(function (t) { return t.id; });
     var rf = $('rerunFailed');
     if (rf) {
       rf.textContent = '重跑全部失败（' + failed + '）';
@@ -218,7 +247,8 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
     } else {
       tb.innerHTML = shown.map(function (t) {
         return '<tr data-row="' + esc(t.id) + '"' + (t.id === selected ? ' class="sel"' : '') + '>' +
-          '<td><code>' + esc(t.id) + '</code><div class="muted">' + esc(t.stage) + '</div></td>' +
+          '<td><code>' + esc(t.id) + '</code><div class="muted">' + esc(t.stage) +
+          (t.startedAt ? ' · 开始 ' + esc(fmtTime(t.startedAt)) : '') + '</div></td>' +
           '<td>' + esc(t.text) + '<div><button class="ghost" data-copy="' + esc(t.text) + '" title="复制任务原文">复制</button></div></td>' +
           '<td>' + stepsHtml(t.steps) + '</td>' +
           '<td>' + (t.why ? esc(t.why) : '<span class="muted">不需要你</span>') + '</td>' +
@@ -232,15 +262,28 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
     }
 
     var eb = $('ended');
-    if (!s.endedRecent.length) {
-      eb.innerHTML = '<tr><td colspan="5" class="empty">还没有结束的工单。取消一张单、或等 worker 跑完，它就会出现在这里（含结果）。</td></tr>';
+    var allEnded = s.endedRecent || [];
+    var total = typeof s.endedTotal === 'number' ? s.endedTotal : allEnded.length;
+    var shown = allEnded.slice(0, endedShown);
+    var more = $('moreEnded');
+    if (more) {
+      var hidden = total - shown.length;
+      more.textContent = hidden > 0 ? '显示更多（还有 ' + hidden + ' 条）' : (endedShown > 8 ? '收起' : '显示更多');
+      more.disabled = total <= 8;
+    }
+    var hint = $('endedHint');
+    if (hint) hint.textContent = total > 0 ? '共 ' + total + ' 条，当前显示 ' + shown.length + ' 条（最近的在最上面）' : '';
+    if (!allEnded.length) {
+      eb.innerHTML = '<tr><td colspan="6" class="empty">还没有结束的工单。取消一张单、或等 worker 跑完，它就会出现在这里（含结果）。</td></tr>';
     } else {
-      eb.innerHTML = s.endedRecent.map(function (e) {
+      eb.innerHTML = shown.map(function (e) {
         var full = e.result ? String(e.result) : '';
         var isOpen = !!expanded[e.id];
         var shownText = !full ? '（这一单结束时没有执行记录）' : (isOpen ? full : full.slice(0, 160) + (full.length > 160 ? '…' : ''));
         var head = '<tr data-row="' + esc(e.id) + '"' + (e.id === selected ? ' class="sel"' : '') + '><td><code>' + esc(e.id) +
-          '</code></td><td>' + esc(e.text) + '</td><td>' + esc(e.worker) + '</td><td>' + esc(shownText) + '</td><td>' +
+          '</code></td><td>' + esc(e.text) + '</td><td>' + esc(e.worker) + '</td>' +
+          '<td title="' + esc(fmtTime(e.startedAt) + ' → ' + fmtTime(e.endedAt)) + '">' + esc(fmtDur(e.startedAt, e.endedAt)) + '</td>' +
+          '<td>' + esc(shownText) + '</td><td>' +
           '<button class="ghost" data-detail="' + esc(e.id) + '">详情</button>';
         if (full.length > 160) {
           head += '<button class="ghost" data-expand="' + esc(e.id) + '" title="展开/收起完整结果">' + (isOpen ? '收起' : '展开') + '</button>';
@@ -374,6 +417,13 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
   if ($('rerunFailed')) {
     $('rerunFailed').addEventListener('click', function () { void rerunFailed($('rerunFailed')); });
   }
+  if ($('moreEnded')) {
+    $('moreEnded').addEventListener('click', function () {
+      var total = lastState && typeof lastState.endedTotal === 'number' ? lastState.endedTotal : (lastState ? lastState.endedRecent.length : 0);
+      endedShown = endedShown >= total ? 8 : total;
+      if (lastState) render(lastState);
+    });
+  }
   if ($('copyDir')) {
     $('copyDir').addEventListener('click', function () {
       if (!detailDir) { note('先点某张单的「详情」，才有执行目录可复制。'); return; }
@@ -381,9 +431,23 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
     });
   }
 
-  // 键盘：⌘/Ctrl+Enter 下发、/ 聚焦输入框、Esc 收起详情或清空搜索
+  // 不用鼠标就能一张张看：↑/↓ 在「进行中」的可见单里切换，并直接打开它的详情
+  function moveSelection(delta) {
+    if (!visibleIds.length) return;
+    var i = visibleIds.indexOf(selected);
+    if (i < 0) i = delta > 0 ? -1 : 0;
+    var next = (i + delta + visibleIds.length) % visibleIds.length;
+    void openWorker(visibleIds[next]);
+  }
+
+  // 键盘：⌘/Ctrl+Enter 下发、/ 聚焦输入框、↑/↓ 切单、Esc 收起详情或清空搜索
   document.addEventListener('keydown', function (e) {
     var tag = (e.target && e.target.tagName) ? String(e.target.tagName).toLowerCase() : '';
+    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && tag !== 'input' && tag !== 'textarea') {
+      e.preventDefault();
+      moveSelection(e.key === 'ArrowDown' ? 1 : -1);
+      return;
+    }
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); void submitTask(); return; }
     if (e.key === '/' && tag !== 'input' && tag !== 'textarea') {
       e.preventDefault();
