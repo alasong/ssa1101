@@ -1,7 +1,7 @@
 # 开发任务分解（v1）
 
 **前置**：[DETAILED-DESIGN.md](DETAILED-DESIGN.md)（目录设计 §1、接口 §2、数据模型 §3、状态机 §4、验收 T01–T15 §8）。
-**口径**：14 个任务，行数合计 **1687 行 src（实测；设计期估 1,300，+30%）+ 500 行测试**，与详设 §1.3 模块表逐行对应（`check-delivery.py` 第 6 条判据机检这三个数一致）。
+**口径**：14 个任务，行数合计 **1699 行 src（实测；设计期估 1,300，+31%）+ 500 行测试**，与详设 §1.3 模块表逐行对应（`check-delivery.py` 第 6 条判据机检这三个数一致）。
 **与目标树同构**：每个任务 = 一个目标树节点；`依赖` 列 = `depends_on` 边。目标树是跨轮台账，本文件是给人看的同一份东西——两边不一致时以目标树为准并回改本文件。
 
 ---
@@ -12,10 +12,10 @@
 |---|---|---|---|---|---|---|
 | K01 | 骨架与 profile | `package.json` `cordis.patch.yml` `presets/` | 0 | — | `dsh --profile superagent --dump-config` 的插件计数 ≥1；删掉 bundle 行后计数为 0 | R20、R14、R16、R21 |
 | K02 | 纯函数域：模型与 stage | `src/core/model.ts` `src/core/stage.ts` | 155 | K01 | `node --test tests/unit/stage.test.ts` 全绿；把第 3 行条件改成恒真，T05 必红 | R05 |
-| K03 | 纯函数域：端口与引擎 | `src/core/ports.ts` `src/core/engine.ts` | 283 | K02 | `node --test tests/unit/engine.test.ts`；去掉 intake 的 external_id 去重，T01 必红 | R01、R05、R17、R22 |
-| K04 | 存储与 schema 版本 | `src/app/store.ts` | 332 | K01 | 把库版本号改成比代码新，启动必须拒绝（退出码非 0） | R18、R21 |
+| K03 | 纯函数域：端口与引擎 | `src/core/ports.ts` `src/core/engine.ts` | 285 | K02 | `node --test tests/unit/engine.test.ts`；去掉 intake 的 external_id 去重，T01 必红 | R01、R05、R17、R22 |
+| K04 | 存储与 schema 版本 | `src/app/store.ts` | 337 | K01 | 把库版本号改成比代码新，启动必须拒绝（退出码非 0） | R18、R21 |
 | K05 | 副作用队列 | `src/app/effects.ts` | 114 | K04 | 写一行 effect 后 `kill -9`，重启该行被执行且只一次（T08） | R08、R09 |
-| K06 | 组合根与 pass 循环 | `src/index.ts` `src/app/runtime.ts` | 130 | K03、K05 | 停掉 pass，event 停在 pending 不被消费 | R12、R02 |
+| K06 | 组合根与 pass 循环 | `src/index.ts` `src/app/runtime.ts` | 135 | K03、K05 | 停掉 pass，event 停在 pending 不被消费 | R12、R02 |
 | K07 | 执行器适配 | `src/app/executor.ts` | 148 | K06 | 两 ticket 的 session id 与目录互不相同（T06）；满槽时人的消息 5 秒内投达（T10） | R06、R10 |
 | K08 | kaa CLI 契约 | `src/app/kaa.ts` | 129 | K01 | 桩拒收时退出码非 0 且 stdout 是合法 JSON；桩挂起 30 秒后进 effects 退避而非阻塞（T15） | R03、R04、R23 |
 | K09 | 触发源 | `src/sources/goal-tree.ts` `src/sources/manual.ts` | 148 | K04 | 同一 revision 轮询两次只产生 1 个 event（T01 的 external_id 侧） | R01、R07 |
@@ -25,7 +25,7 @@
 | K13 | 验收测试 T01–T15 | `tests/unit/*` `tests/integration/*` `tests/fixtures/*` | 500 | K07–K12 | `bash scripts/verify.sh` 全绿；把某角色工具加满，预算测试必须红（T13） | R19 |
 | K14 | 端到端与崩溃实测 | `scripts/verify.sh` `tests/integration/e2e.test.ts` | 0 | K13 | manual 触发一路跑到 treeWrite，全部落库；中途 `kill -9` 后重启不重复执行 | R09、R18 |
 
-**行数口径**：K13 的 500 行是测试，不计入 src 的 1687；K01、K14 只产出配置与编排脚本，记 0（不虚报）。
+**行数口径**：K13 的 500 行是测试，不计入 src 的 1699；K01、K14 只产出配置与编排脚本，记 0（不虚报）。
 
 ---
 
@@ -109,7 +109,7 @@ manual 触发 → event → ticket → session → report → kaa 桩 → treeWr
 
 **为什么单列一节**：人打开面板想知道的是“哪个大块功能到什么程度、哪块卡住”，不是“第 14 个任务做完没”。任务表是执行维度，功能块是汇报维度，依赖层是诊断维度——三个维度，三份读数，别互相冒充。
 
-**归组（14 个任务，无遗漏无重复，行数和 = 1687 实测）**：
+**归组（14 个任务，无遗漏无重复，行数和 = 1699 实测）**：
 
 | 功能块 | 任务 | 代码行 | 完成判据（一句话能否说出口） |
 |---|---|---|---|

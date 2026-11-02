@@ -67,7 +67,12 @@ export function startRuntime(deps: RuntimeDeps): Runtime {
     }
   }
 
-  let n = 0;
+  // 发号从"库里已有的最大号"续，不能从 0 数：进程重启会让 n 归零，
+  // 于是新工单又叫 t1，put() 的 ON CONFLICT DO UPDATE 把已结束的旧 t1 整条覆盖（实测踩过）。
+  let n = repo.tickets.all().reduce((max, t) => {
+    const m = /^t(\d+)$/.exec(t.id);
+    return m === null ? max : Math.max(max, Number(m[1]));
+  }, 0);
   const engine = new Engine({ repo, gate: deps.gate, now, nextId: () => `t${++n}` });
 
   let timer: ReturnType<typeof setInterval> | undefined;

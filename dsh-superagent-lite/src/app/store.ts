@@ -252,6 +252,11 @@ export function createRepository(db: DatabaseSync): Repository {
       open() {
         return (db.prepare(`SELECT * FROM ticket WHERE ended = 0`).all() as any[]).map(rowToTicket);
       },
+      // 全表（含已结束）。id 分配必须看全表：只看 open() 会让重启后重新从 t1 发号，
+      // 撞上已结束的同名工单 —— put() 是 ON CONFLICT DO UPDATE，会把旧行整条覆盖掉。
+      all() {
+        return (db.prepare(`SELECT * FROM ticket`).all() as any[]).map(rowToTicket);
+      },
     },
     reports: {
       append(r) {

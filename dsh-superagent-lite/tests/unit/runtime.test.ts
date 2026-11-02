@@ -251,3 +251,33 @@ test('6. 版本守卫：库里 user_version=99 时 startRuntime 抛 SchemaTooNew
   );
   assert.equal(rt, undefined, '守卫抛错时不得返回一个可用的 runtime');
 });
+
+// ---------------------------------------------------------------------------
+// 7. 重启不从 t1 重新发号（实测踩到的覆盖缺陷）
+// ---------------------------------------------------------------------------
+test('7. 重启后发号续号：已结束的 t1 不被新工单覆盖', async (t) => {
+  const file = tmpDb();
+  let rt: Runtime | undefined;
+  t.after(() => {
+    rt?.close();
+    removeDb(file);
+  });
+
+  // 第一轮：模拟"上一轮进程"留下一张已结束的 t1。
+  rt = startRuntime({ dbPath: file, gate: allowGate(), now: () => 30_000 });
+  rt.repo.tickets.put({ id: 't1', threadKey: 'thread-old', mandate: MANDATE, createdAt: 1, state: 'ended' });
+  rt.close();
+
+  // 第二轮：新进程（发号计数器重新初始化）收到一条新需求。
+  rt = startRuntime({ dbPath: file, gate: allowGate(), now: () => 40_000 });
+  rt.repo.events.put(makeEvent('e1', 'ext-1', 40_000));
+  await rt.tick();
+
+  const open = rt.repo.tickets.open();
+  assert.equal(open.length, 1, '新需求应建出 1 张单');
+  assert.equal(open[0].id, 't2', '重启后必须续号，不能又叫 t1（会撞上已结束的同名行）');
+
+  const old = rt.repo.tickets.get('t1');
+  assert.equal(old?.state, 'ended', '旧的 t1 必须还是已结束');
+  assert.equal(old?.threadKey, 'thread-old', '旧的 t1 不得被新工单的 threadKey 覆盖');
+});

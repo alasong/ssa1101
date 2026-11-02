@@ -60,6 +60,8 @@ export interface Repository {
     put(t: Ticket): void;
     get(id: string): Ticket | undefined;
     open(): Ticket[];
+    /** 含已结束。发号要用它：只看 open() 会在重启后撞上已结束的旧 id。 */
+    all(): Ticket[];
   };
   reports: {
     append(r: Report): void;
