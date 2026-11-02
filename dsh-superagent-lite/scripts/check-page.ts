@@ -88,6 +88,16 @@ for (const [needle, why] of [
     if (!t[1].includes('<th>耗时</th>')) problems.push('已结束表没有「耗时」列：跑了多久看不出来');
   }
   if (!page.includes('id="moreEnded"')) problems.push('已结束没有「显示更多」：超过 8 条就再也看不到');
+  // 已结束必须能查能排：历史越积越多，只能靠眼睛一行行扫是不行的
+  if (!page.includes('id="endedQ"')) problems.push('已结束没有搜索框：只能一行行扫');
+  if (!page.includes('id="sortEnded"')) problems.push('已结束没有排序选择');
+  for (const v of ['value="new"', 'value="old"', 'value="dur"']) {
+    if (!page.includes(v)) problems.push(`排序缺少 ${v} 选项（最新/最旧/耗时最长）`);
+  }
+  if (!js.includes('PREF_KEY')) problems.push('没有把界面状态存起来：每次刷新都要重新设搜索与筛选');
+  if (!js.includes('function loadPrefs(') || !js.includes('function savePrefs(')) {
+    problems.push('偏好没有读写两个入口（loadPrefs / savePrefs）');
+  }
   if (!page.includes('@media (max-width: 900px)')) problems.push('没有窄屏规则：两栏并排会把表格挤成竖条');
   if (!js.includes('function fmtDur(')) problems.push('没有耗时格式化函数，耗时只能靠人算');
 }

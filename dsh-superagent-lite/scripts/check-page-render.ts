@@ -124,8 +124,8 @@ const state = {
   ended: 10,
   endedTotal: 10,
   endedRecent: [
-    { id: 't1', text: '页面测试：把按钮改成蓝色', worker: 'done', result: '已完成。'.repeat(60), startedAt: 1000, endedAt: 121000 },
-    { id: 't2', text: '短结果', worker: 'done', result: '好', startedAt: 2000, endedAt: 32000 },
+    { id: 't1', text: '页面测试：把按钮改成蓝色', worker: 'done', result: '已完成。'.repeat(60), startedAt: 200000, endedAt: 320000 },
+    { id: 't2', text: '短结果', worker: 'done', result: '好', startedAt: 300000, endedAt: 330000 },
     { id: 't3b', text: '第三条', worker: 'done', result: '好', startedAt: 10000, endedAt: 40000 },
     { id: 't4b', text: '第四条', worker: 'done', result: '好', startedAt: 10000, endedAt: 40000 },
     { id: 't5b', text: '第五条', worker: 'done', result: '好', startedAt: 10000, endedAt: 40000 },
@@ -153,7 +153,17 @@ g.document = {
     docHandlers[type] = fn;
   },
 };
-g.window = {};
+const storage: Record<string, string> = {};
+const localStorageStub = {
+  getItem: (k: string) => (k in storage ? storage[k] : null),
+  setItem: (k: string, v: string) => {
+    storage[k] = String(v);
+  },
+  removeItem: (k: string) => {
+    delete storage[k];
+  },
+};
+g.window = { localStorage: localStorageStub };
 g.setInterval = () => 0;
 g.fetch = async (url: string) => {
   calls.push(String(url));
@@ -234,6 +244,36 @@ else {
     problems.push(`「显示更多」没算对隐藏条数：${el('moreEnded').textContent}`);
   }
   if (!el('endedHint').textContent.includes('共 10 条')) problems.push('已结束没显示总条数');
+  // 已结束自己的搜索：命中「页面」只剩 t1，且计数写明命中几条
+  el('endedQ').value = '页面';
+  el('endedQ').handlers.input();
+  const eqHit = el('ended').innerHTML;
+  if (!eqHit.includes('页面测试')) problems.push('已结束搜索没用上（命中项没出现）');
+  if (eqHit.includes('短结果')) problems.push('已结束搜索没过滤（未命中的行还在）');
+  if (!el('endedHint').textContent.includes('命中「页面」1 条')) {
+    problems.push(`已结束的命中计数不对：${el('endedHint').textContent}`);
+  }
+  // 偏好落盘：搜索词与排序必须写进 localStorage（下次打开还是这个状态）
+  if (!storage['sa.console.prefs.v1'] || !storage['sa.console.prefs.v1'].includes('页面')) {
+    problems.push('已结束搜索词没有存进 localStorage，下次打开还得重打一遍');
+  }
+  el('endedQ').value = '';
+  el('endedQ').handlers.input();
+  // 排序：改成「最旧在前」，t1（200s）必须排在 t2（300s）之前
+  el('sortEnded').value = 'old';
+  el('sortEnded').handlers.change();
+  // 10 条默认只显示 8 条，而最旧的两条（t1/t2）恰恰会被挤出前 8——先「显示更多」再比顺序
+  el('moreEnded').handlers.click();
+  const oldFirst = el('ended').innerHTML;
+  // 用 data-row 精确匹配：直接找 't1' 会先命中 't10'（前缀包含）
+  const posT1 = oldFirst.indexOf('data-row="t1"');
+  const posT2 = oldFirst.indexOf('data-row="t2"');
+  if (!(posT1 >= 0 && posT2 >= 0 && posT1 < posT2)) {
+    problems.push(`「最旧在前」没生效（t1 应排在 t2 之前，实际 ${posT1} vs ${posT2}）`);
+  }
+  el('sortEnded').value = 'new';
+  el('sortEnded').handlers.change();
+  el('moreEnded').handlers.click(); // 收起回默认 8 条，后面的断言仍按默认视图
   // 默认只渲染 8 条：第 9/10 条要点「显示更多」才出现
   if (endedHtml.includes('第十条')) problems.push('已结束一次全画了 10 条，超出默认 8 条还没翻页');
   if (!endedHtml.includes('data-copy')) problems.push('已结束里没有「复制结果」');
@@ -252,6 +292,24 @@ void (async () => {
     if (!el('detail').textContent.includes('w-t9-abc')) problems.push('#detail 里没写入 worker 记录');
     if (!el('detail').textContent.includes('AUTH 401')) problems.push('#detail 里没写入失败原因');
   }
+  // 刷新恢复：把偏好先写进 localStorage，再跑一遍页面脚本，界面应回到上次的样子
+  els.clear();
+  storage['sa.console.prefs.v1'] = JSON.stringify({
+    q: '暗色', onlyNeed: true, endedQ: '页面', sortEnded: 'old', endedShown: 50,
+  });
+  try {
+    new Function(js)();
+  } catch (e) {
+    problems.push(`带偏好重载抛错：${String(e)}`);
+  }
+  await new Promise((r) => setTimeout(r, 20));
+  if (el('q').value !== '暗色') problems.push(`搜索词没恢复（${el('q').value}）`);
+  if (el('onlyNeed').checked !== true) problems.push('「只看需要我处理」没恢复');
+  if (el('endedQ').value !== '页面') problems.push(`已结束搜索没恢复（${el('endedQ').value}）`);
+  if (el('sortEnded').value !== 'old') problems.push(`已结束排序没恢复（${el('sortEnded').value}）`);
+  if (!el('ended').innerHTML.includes('页面测试')) problems.push('恢复后的已结束搜索没生效（命中项没出现）');
+  if (el('ended').innerHTML.includes('短结果')) problems.push('恢复后的已结束搜索没过滤');
+
   if (!docHandlers.keydown) problems.push('没有注册键盘快捷方式（⌘/Ctrl+Enter、/、Esc、↑/↓）');
   else {
     // ↑/↓ 必须真的换单：按一次 ArrowDown → 请求第一张可见单的 worker；再按一次 → 第二张
@@ -276,5 +334,5 @@ void (async () => {
     for (const p of problems) console.error(`  - ${p}`);
     process.exit(1);
   }
-  console.log('页面渲染 OK：多行都画、需要处理的排前、搜索能筛、复制/展开/批量重跑都在、耗时按真实时间戳、已结束默认 8 条可「显示更多」、↑/↓ 真能换单、空态指下一步、详情真取 /api/worker');
+  console.log('页面渲染 OK：多行都画、需要处理的排前、搜索能筛、复制/展开/批量重跑都在、耗时按真实时间戳、已结束默认 8 条可「显示更多」并可搜索/排序、刷新能恢复偏好、↑/↓ 真能换单、空态指下一步、详情真取 /api/worker');
 })();
