@@ -125,7 +125,7 @@ const state = {
   endedTotal: 10,
   endedRecent: [
     { id: 't1', text: '页面测试：把按钮改成蓝色', worker: 'done', result: '已完成。'.repeat(60), startedAt: 200000, endedAt: 320000 },
-    { id: 't2', text: '短结果', worker: 'done', result: '好', startedAt: 300000, endedAt: 330000 },
+    { id: 't2', text: '短结果', worker: 'failed', result: '好', startedAt: 300000, endedAt: 330000 },
     { id: 't3b', text: '第三条', worker: 'done', result: '好', startedAt: 10000, endedAt: 40000 },
     { id: 't4b', text: '第四条', worker: 'done', result: '好', startedAt: 10000, endedAt: 40000 },
     { id: 't5b', text: '第五条', worker: 'done', result: '好', startedAt: 10000, endedAt: 40000 },
@@ -250,7 +250,7 @@ else {
   const eqHit = el('ended').innerHTML;
   if (!eqHit.includes('页面测试')) problems.push('已结束搜索没用上（命中项没出现）');
   if (eqHit.includes('短结果')) problems.push('已结束搜索没过滤（未命中的行还在）');
-  if (!el('endedHint').textContent.includes('命中「页面」1 条')) {
+  if (!el('endedHint').textContent.includes('命中「页面」') || !el('endedHint').textContent.includes('→ 1 条')) {
     problems.push(`已结束的命中计数不对：${el('endedHint').textContent}`);
   }
   // 偏好落盘：搜索词与排序必须写进 localStorage（下次打开还是这个状态）
@@ -259,6 +259,15 @@ else {
   }
   el('endedQ').value = '';
   el('endedQ').handlers.input();
+  // 状态过滤：只看失败 → 只剩 t2（夹具里它是 failed）
+  el('filterEnded').value = 'failed';
+  el('filterEnded').handlers.change();
+  const onlyFailed = el('ended').innerHTML;
+  if (!onlyFailed.includes('data-row="t2"') || onlyFailed.includes('data-row="t1"')) {
+    problems.push('「只看失败」没生效（应只剩 t2）');
+  }
+  el('filterEnded').value = 'all';
+  el('filterEnded').handlers.change();
   // 排序：改成「最旧在前」，t1（200s）必须排在 t2（300s）之前
   el('sortEnded').value = 'old';
   el('sortEnded').handlers.change();
@@ -289,8 +298,16 @@ void (async () => {
   if (typeof win.openWorker === 'function') {
     await (win.openWorker as (id: string) => Promise<void>)('t9');
     if (!calls.some((c) => c.startsWith('/api/worker?id=t9'))) problems.push('openWorker 没有请求 /api/worker');
-    if (!el('detail').textContent.includes('w-t9-abc')) problems.push('#detail 里没写入 worker 记录');
-    if (!el('detail').textContent.includes('AUTH 401')) problems.push('#detail 里没写入失败原因');
+    const withDetail = el('tickets').innerHTML;
+    if (!withDetail.includes('data-detail-row="t9"')) problems.push('详情没有展开在 t9 那一行下面（行内展开没生效）');
+    if (!withDetail.includes('w-t9-abc')) problems.push('行内详情里没写入 worker 记录');
+    if (!withDetail.includes('AUTH 401')) problems.push('行内详情里没写入失败原因');
+    if (!withDetail.includes('data-copy-dir="')) problems.push('行内详情里没有「复制执行目录」');
+    // 再点一次必须收起，而不是再开一遍
+    await (win.openWorker as (id: string) => Promise<void>)('t9');
+    if (el('tickets').innerHTML.includes('w-t9-abc')) problems.push('再点一次「详情」没有收起');
+    // 没有 worker 记录的工单：行内详情要说下一步，而不是空白
+    await (win.openWorker as (id: string) => Promise<void>)('t8');
   }
   // 刷新恢复：把偏好先写进 localStorage，再跑一遍页面脚本，界面应回到上次的样子
   els.clear();
@@ -334,5 +351,5 @@ void (async () => {
     for (const p of problems) console.error(`  - ${p}`);
     process.exit(1);
   }
-  console.log('页面渲染 OK：多行都画、需要处理的排前、搜索能筛、复制/展开/批量重跑都在、耗时按真实时间戳、已结束默认 8 条可「显示更多」并可搜索/排序、刷新能恢复偏好、↑/↓ 真能换单、空态指下一步、详情真取 /api/worker');
+  console.log('页面渲染 OK：多行都画、需要处理的排前、搜索能筛、复制/展开/批量重跑都在、耗时按真实时间戳、已结束默认 8 条可「显示更多」并可搜索/排序/状态过滤、刷新能恢复偏好、详情行内展开/收起、↑/↓ 真能换单、空态指下一步、详情真取 /api/worker');
 })();

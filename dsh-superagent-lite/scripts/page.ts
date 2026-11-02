@@ -50,7 +50,10 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
  .steps span.now{color:#f0c674;border-color:#5a4a24}
  #err{color:#ff7b72;font-size:12.5px;margin-top:8px;white-space:pre-wrap}
  #note{color:#7ee787;font-size:12.5px;margin-top:8px;white-space:pre-wrap}
- #detail{background:#0f1115;border:1px solid #222731;border-radius:6px;padding:10px;max-height:300px;overflow:auto}
+ .detail-box{background:#12161d;border-left:3px solid #2b4a33;border-radius:0 6px 6px 0;padding:8px 10px;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#b9c4d4;white-space:pre-wrap}
+ .detail-box b{color:#9fd0ff}
+ tr.detail-row td{padding:0 6px 8px 6px;background:#12161d}
+ tr.detail-row .row{display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap}
  .kbd{border:1px solid #333a46;border-radius:4px;padding:0 4px;font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#9fb0c8}
  /* 窄屏（手机 / 半屏窗口）：两栏并排会把表格挤成竖条，改成单栏 + 表格可横向滚 */
  @media (max-width: 900px){
@@ -100,14 +103,15 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
   <table><thead><tr><th>工单</th><th>任务原文</th><th>委托进度</th><th>为什么找你</th><th>操作</th></tr></thead>
   <tbody id="tickets"><tr><td colspan="5" class="empty">还没有工单。</td></tr></tbody></table>
 
-  <h2 style="margin-top:18px">④ worker 详情</h2>
-  <div class="tools"><button class="ghost" id="copyDir">复制执行目录</button>
-  <span class="muted">Esc 收起详情 · ↑/↓ 切换单子并直接看它的详情 · 也可以点「详情」</span></div>
-  <pre id="detail">（点某张单的「详情」——会显示它的 dsh 会话 id、执行的命令、日志行数与最终结果）</pre>
-
   <h2 style="margin-top:18px">⑤ 已结束（含结果）</h2>
   <div class="tools">
    <input id="endedQ" placeholder="在已结束里搜：原文 / 工单号 / 结果" autocomplete="off">
+   <select id="filterEnded" title="只看某种结果">
+    <option value="all">全部状态</option>
+    <option value="done">成功</option>
+    <option value="failed">失败</option>
+    <option value="none">无执行记录</option>
+   </select>
    <select id="sortEnded" title="按什么排">
     <option value="new">最新在前</option>
     <option value="old">最旧在前</option>
@@ -131,11 +135,12 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
   var lastJson = '';
   var selected = null;
   var expanded = {};
+  var detailOpen = {};   // id → 行内详情 HTML（有 key 就表示那一行正展开）
   var visibleIds = [];   // 当前筛选后可见的工单顺序（↑/↓ 按它切换）
   var endedShown = 8;
   var endedQ = '';
+  var endedState = 'all';
   var sortEnded = 'new';
-  var detailDir = '';
 
   // 页面状态存起来：每天打开都是上次的样子，不用每次重设搜索与条数
   var PREF_KEY = 'sa.console.prefs.v1';
@@ -148,6 +153,7 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
       if (typeof p.onlyNeed === 'boolean' && $('onlyNeed')) $('onlyNeed').checked = p.onlyNeed;
       if (typeof p.endedQ === 'string' && $('endedQ')) $('endedQ').value = p.endedQ;
       if (typeof p.sortEnded === 'string' && $('sortEnded')) $('sortEnded').value = p.sortEnded;
+      if (typeof p.endedState === 'string' && $('filterEnded')) $('filterEnded').value = p.endedState;
       if (typeof p.endedShown === 'number' && p.endedShown >= 8) endedShown = p.endedShown;
     } catch (e) { /* 存坏了就当没有，不影响使用 */ }
   }
@@ -159,6 +165,7 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
         onlyNeed: !!($('onlyNeed') && $('onlyNeed').checked),
         endedQ: $('endedQ') ? $('endedQ').value : '',
         sortEnded: $('sortEnded') ? $('sortEnded').value : 'new',
+        endedState: $('filterEnded') ? $('filterEnded').value : 'all',
         endedShown: endedShown,
       }));
     } catch (e) { /* 隐私模式存不了就算了 */ }
@@ -232,6 +239,13 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
     return Math.floor(min / 60) + ' 小时 ' + (min % 60) + ' 分';
   }
 
+  function endedStateLabel(v) {
+    if (v === 'done') return '成功';
+    if (v === 'failed') return '失败';
+    if (v === 'none') return '无执行记录';
+    return '全部状态';
+  }
+
   function stepsHtml(steps) {
     if (!steps || !steps.length) return '<span class="muted">—</span>';
     var now = 0;
@@ -282,18 +296,22 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
       tb.innerHTML = '<tr><td colspan="5" class="empty">没有符合筛选条件的工单（共 ' + all.length + ' 张）。清空搜索框或取消「只看需要我处理」。</td></tr>';
     } else {
       tb.innerHTML = shown.map(function (t) {
-        return '<tr data-row="' + esc(t.id) + '"' + (t.id === selected ? ' class="sel"' : '') + '>' +
-          '<td><code>' + esc(t.id) + '</code><div class="muted">' + esc(t.stage) +
+        var cells = '<td><code>' + esc(t.id) + '</code><div class="muted">' + esc(t.stage) +
           (t.startedAt ? ' · 开始 ' + esc(fmtTime(t.startedAt)) : '') + '</div></td>' +
           '<td>' + esc(t.text) + '<div><button class="ghost" data-copy="' + esc(t.text) + '" title="复制任务原文">复制</button></div></td>' +
           '<td>' + stepsHtml(t.steps) + '</td>' +
           '<td>' + (t.why ? esc(t.why) : '<span class="muted">不需要你</span>') + '</td>' +
-          '<td><button class="ghost" data-detail="' + esc(t.id) + '">详情</button>' +
+          '<td><button class="ghost" data-detail="' + esc(t.id) + '">' + (detailOpen[t.id] !== undefined ? '收起' : '详情') + '</button>' +
           (t.worker === 'done'
             ? '<button class="ghost" data-close="' + esc(t.id) + '" title="验收通过：结束这张单（结果不动）">结束</button>'
             : '') +
           '<button class="ghost" data-retry="' + esc(t.id) + '" title="用同一条任务原文重新下发一次（旧单先结束）">重跑</button>' +
-          '<button class="danger" data-cancel="' + esc(t.id) + '" title="停掉它的 worker 并结束这张单">取消</button></td></tr>';
+          '<button class="danger" data-cancel="' + esc(t.id) + '" title="停掉它的 worker 并结束这张单">取消</button></td>';
+        var row = '<tr data-row="' + esc(t.id) + '"' + (t.id === selected ? ' class="sel"' : '') + '>' + cells + '</tr>';
+        if (detailOpen[t.id] !== undefined) {
+          row += '<tr class="detail-row" data-detail-row="' + esc(t.id) + '"><td colspan="5">' + detailOpen[t.id] + '</td></tr>';
+        }
+        return row;
       }).join('');
     }
 
@@ -302,7 +320,11 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
     var total = typeof s.endedTotal === 'number' ? s.endedTotal : allEnded.length;
     // 已结束自己的搜索与排序（与「进行中」分开：找历史与找当前不是一件事）
     var eq = endedQ.toLowerCase();
-    var matched = eq === '' ? allEnded.slice() : allEnded.filter(function (e) {
+    var matched = allEnded.filter(function (e) {
+      if (endedState === 'done' && e.worker !== 'done') return false;
+      if (endedState === 'failed' && e.worker !== 'failed') return false;
+      if (endedState === 'none' && e.worker !== '—') return false;
+      if (eq === '') return true;
       return [e.id, e.text, e.result || '', e.worker || ''].join(' ').toLowerCase().indexOf(eq) >= 0;
     });
     matched.sort(function (a, b) {
@@ -320,11 +342,17 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
     var hint = $('endedHint');
     if (hint) {
       hint.textContent = total === 0 ? ''
-        : (eq === '' ? '共 ' + total + ' 条，当前显示 ' + shown.length + ' 条（最近的在最上面）'
-          : '共 ' + total + ' 条，命中「' + endedQ + '」' + matched.length + ' 条，当前显示 ' + shown.length + ' 条');
+        : '共 ' + total + ' 条' +
+          (eq !== '' ? '，命中「' + endedQ + '」' : '') +
+          (endedState !== 'all' ? '，状态 ' + endedStateLabel(endedState) : '') +
+          ' → ' + matched.length + ' 条，当前显示 ' + shown.length + ' 条';
     }
-    if (eq !== '' && !matched.length) {
-      eb.innerHTML = '<tr><td colspan="6" class="empty">已结束里没有匹配「' + esc(endedQ) + '」的工单。清空搜索框看全部 ' + total + ' 条。</td></tr>';
+    if (!matched.length && (eq !== '' || endedState !== 'all')) {
+      var cond = [];
+      if (eq !== '') cond.push('匹配「' + endedQ + '」');
+      if (endedState !== 'all') cond.push('状态是「' + endedStateLabel(endedState) + '」');
+      eb.innerHTML = '<tr><td colspan="6" class="empty">已结束里没有' + esc(cond.join(' 且 ')) +
+        '的工单。清空搜索或把状态改回「全部状态」看全部 ' + total + ' 条。</td></tr>';
       return;
     }
     if (!allEnded.length) {
@@ -338,58 +366,67 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
           '</code></td><td>' + esc(e.text) + '</td><td>' + esc(e.worker) + '</td>' +
           '<td title="' + esc(fmtTime(e.startedAt) + ' → ' + fmtTime(e.endedAt)) + '">' + esc(fmtDur(e.startedAt, e.endedAt)) + '</td>' +
           '<td>' + esc(shownText) + '</td><td>' +
-          '<button class="ghost" data-detail="' + esc(e.id) + '">详情</button>';
+          '<button class="ghost" data-detail="' + esc(e.id) + '">' + (detailOpen[e.id] !== undefined ? '收起' : '详情') + '</button>';
         if (full.length > 160) {
           head += '<button class="ghost" data-expand="' + esc(e.id) + '" title="展开/收起完整结果">' + (isOpen ? '收起' : '展开') + '</button>';
         }
         if (full) head += '<button class="ghost" data-copy="' + esc(full) + '" title="复制完整结果">复制</button>';
-        return head + '</td></tr>';
+        var endRow = head + '</td></tr>';
+        if (detailOpen[e.id] !== undefined) {
+          endRow += '<tr class="detail-row" data-detail-row="' + esc(e.id) + '"><td colspan="6">' + detailOpen[e.id] + '</td></tr>';
+        }
+        return endRow;
       }).join('');
     }
   }
 
-  function renderWorker(id, w) {
+  /** 一条 worker 记录 → 行内详情 HTML（就展开在那一行下面，不把人送到页面底部）。 */
+  function detailHtml(id, w) {
     if (!w) {
-      detailDir = '';
-      $('detail').textContent = id + '：还没有 worker 记录（这张单还没派出去，或派发失败）。' +
-        '\\n下一步：等它被派发、或点「重跑」用原任务再下发一次。';
-      return;
+      return '<div class="detail-box"><b>' + esc(id) + '：还没有 worker 记录</b>（这张单还没派出去，或派发失败）。' +
+        '\\n下一步：等它被派发，或点「重跑」用原任务再下发一次。</div>';
     }
-    detailDir = w.dir || '';
     var lines = ['工单 ' + id + ' → worker ' + w.runId,
       'worker 会话：' + (w.dshSessionId || '（还没收到 session 事件）'),
       '状态：' + w.state + ' · 退出码 ' + (w.exitCode === null ? '—' : w.exitCode) + ' · ndjson ' + w.lines + ' 行',
       '命令：' + (w.cmd || []).join(' '),
-      '目录：' + w.dir,
-      '日志：' + w.logPath];
+      '目录：' + (w.dir || '—'),
+      '日志：' + (w.logPath || '—')];
     if (w.error) lines.push('错误：' + w.error);
     if (w.stderrTail && w.stderrTail.length) lines.push('stderr 尾部：' + w.stderrTail.slice(-5).join(' / '));
-    lines.push('', '最终结果：', w.finalText || '（还没有 final 事件）');
+    lines.push('', '最终结果：' + (w.finalText || '（还没有 final 事件）'));
     if (w.tail && w.tail.length) lines.push('', '日志尾部（' + w.tail.length + ' 行）：', w.tail.slice(-12).join('\\n'));
-    // 内容没变就不重写：否则正在 #detail 里选中的日志，每 1.5 秒被清掉一次
-    var text = lines.join('\\n');
-    if ($('detail').textContent !== text) $('detail').textContent = text;
-    var d = $('detail');
-    if (d && d.scrollIntoView) d.scrollIntoView({ block: 'nearest' });
+    return '<div class="detail-box">' + esc(lines.join('\\n')) +
+      '<div class="row">' +
+      '<button class="ghost" data-copy-dir="' + esc(w.dir || '') + '" title="复制这一单的执行目录">复制执行目录</button>' +
+      (w.finalText ? '<button class="ghost" data-copy="' + esc(w.finalText) + '" title="复制最终结果">复制最终结果</button>' : '') +
+      '</div></div>';
   }
 
-  function scrollToDetail() {
-    var d = $('detail');
-    if (d && d.scrollIntoView) d.scrollIntoView({ block: 'nearest' });
-  }
-
-  async function openWorker(id) {
-    var changed = selected !== id;
+  /** 拉一次 worker 记录放进那一行的行内详情（轮询时也走这里刷新内容）。 */
+  async function loadDetail(id) {
     selected = id;
-    if (changed && lastState) render(lastState); // 只有换了单才重画（高亮行），轮询不打断选中
     try {
       var r = await fetch('/api/worker?id=' + encodeURIComponent(id));
-      if (r.status === 404) { renderWorker(id, null); scrollToDetail(); return; }
-      var w = await r.json();
-      if (!r.ok) throw new Error(w.error || ('HTTP ' + r.status));
-      renderWorker(id, w);
-      scrollToDetail();
+      var w = r.status === 404 ? null : await r.json();
+      if (r.status !== 404 && !r.ok) throw new Error(w.error || ('HTTP ' + r.status));
+      var html = detailHtml(id, w);
+      // 内容没变就不重画：否则正在详情里选中的日志每 1.5 秒被清掉
+      if (detailOpen[id] === html) return;
+      detailOpen[id] = html;
+      if (lastState) render(lastState);
     } catch (e) { showErr(e); }
+  }
+
+  /** 点「详情」：展开那一行；再点一次收起（不跳页、不丢上下文）。 */
+  async function openWorker(id) {
+    if (detailOpen[id] !== undefined) {
+      delete detailOpen[id];
+      if (lastState) render(lastState);
+      return;
+    }
+    selected = id;
+    await loadDetail(id);
   }
 
   async function refresh(force) {
@@ -400,7 +437,7 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
         lastJson = j;
         render(s);
       }
-      if (selected) { void openWorker(selected); }
+      if (selected && detailOpen[selected] !== undefined) { void loadDetail(selected); }
       $('err').textContent = '';
     } catch (e) { showErr(e); }
   }
@@ -486,17 +523,18 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
       if (lastState) render(lastState);
     });
   }
+  if ($('filterEnded')) {
+    $('filterEnded').addEventListener('change', function () {
+      endedState = String($('filterEnded').value || 'all');
+      savePrefs();
+      if (lastState) render(lastState);
+    });
+  }
   if ($('sortEnded')) {
     $('sortEnded').addEventListener('change', function () {
       sortEnded = String($('sortEnded').value || 'new');
       savePrefs();
       if (lastState) render(lastState);
-    });
-  }
-  if ($('copyDir')) {
-    $('copyDir').addEventListener('click', function () {
-      if (!detailDir) { note('先点某张单的「详情」，才有执行目录可复制。'); return; }
-      copyText(detailDir, $('copyDir'));
     });
   }
 
@@ -525,9 +563,8 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
     }
     if (e.key === 'Escape') {
       if ($('q') && $('q').value) { $('q').value = ''; if (lastState) render(lastState); return; }
+      detailOpen = {};
       selected = null;
-      detailDir = '';
-      $('detail').textContent = '（点某张单的「详情」——会显示它的 dsh 会话 id、执行的命令、日志行数与最终结果）';
       if (lastState) render(lastState);
     }
   });
@@ -545,6 +582,12 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
     if (cl) { void closeTicket(cl); return; }
     var x = el.getAttribute('data-expand');
     if (x) { expanded[x] = !expanded[x]; if (lastState) render(lastState); return; }
+    var cd = el.getAttribute('data-copy-dir');
+    if (cd !== null) {
+      if (cd === '') { note('这一单还没有执行目录可复制。'); return; }
+      copyText(cd, el);
+      return;
+    }
     var cp = el.getAttribute('data-copy');
     if (cp !== null) { copyText(cp, el); }
   }
@@ -554,6 +597,7 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
   loadPrefs();
   endedQ = $('endedQ') ? String($('endedQ').value || '').trim() : '';
   sortEnded = $('sortEnded') ? String($('sortEnded').value || 'new') : 'new';
+  endedState = $('filterEnded') ? String($('filterEnded').value || 'all') : 'all';
   refresh();
   setInterval(refresh, 1500);
 })();

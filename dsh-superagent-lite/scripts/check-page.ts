@@ -64,7 +64,7 @@ for (const [id, why] of [
   ['q', '搜索框：单子一多，找一条是在表里用眼睛扫'],
   ['onlyNeed', '「只看需要我处理」：把不需要你的先收起来'],
   ['rerunFailed', '「重跑全部失败」：失败一批时要一张张点'],
-  ['copyDir', '「复制执行目录」：目录只能靠手抄'],
+
   ['note', '操作后的回执行：点完按钮必须有反馈'],
 ]) {
   if (!page.includes('id="' + id + '"')) problems.push(`缺少 #${id}（${why}）`);
@@ -91,6 +91,10 @@ for (const [needle, why] of [
   // 已结束必须能查能排：历史越积越多，只能靠眼睛一行行扫是不行的
   if (!page.includes('id="endedQ"')) problems.push('已结束没有搜索框：只能一行行扫');
   if (!page.includes('id="sortEnded"')) problems.push('已结束没有排序选择');
+  if (!page.includes('id="filterEnded"')) problems.push('已结束没有按状态过滤');
+  for (const v of ['value="all"', 'value="done"', 'value="failed"', 'value="none"']) {
+    if (!page.includes(v)) problems.push(`状态过滤缺少 ${v} 选项（全部/成功/失败/无记录）`);
+  }
   for (const v of ['value="new"', 'value="old"', 'value="dur"']) {
     if (!page.includes(v)) problems.push(`排序缺少 ${v} 选项（最新/最旧/耗时最长）`);
   }
@@ -104,8 +108,15 @@ for (const [needle, why] of [
 
 // ⑨ 数据没变就不重画（整表 + 详情面板 + 选中行三处都要判）
 if (!js.includes('j !== lastJson')) problems.push('轮询没有「数据没变就不重画」，每 1.5 秒冲掉选中与滚动位置');
-if (!js.includes("$('detail').textContent !== text")) problems.push('详情面板每轮都重写，正在选中的日志会被清掉');
-if (!js.includes('var changed = selected !== id')) problems.push('打开详情后每轮都整表重画，选中行高亮把整表刷新了');
+// 详情必须**行内展开**：点击后在那一行下面插一行，不再把人送到页面底部的单块面板
+if (!page.includes('tr.detail-row')) problems.push('没有行内详情的样式（tr.detail-row）');
+if (!js.includes('data-detail-row=')) problems.push('详情没有插入到工单行下方，仍是页面底部单块');
+if (page.includes('<pre id="detail">')) problems.push('还留着底部详情面板：同一份信息会显示两遍');
+if (!js.includes('if (detailOpen[id] === html) return;')) problems.push('行内详情每轮都重写，正在选中的日志会被清掉');
+if (!js.includes('delete detailOpen[id]')) problems.push('「详情」再点一次收不起来（只能开不能关）');
+for (const attr of ['data-copy-dir="', 'data-copy="']) {
+  if (!js.includes(attr)) problems.push(`行内详情缺少 ${attr}… 按钮（目录/结果只能手抄）`);
+}
 if (!js.includes('window.rerunFailed = rerunFailed')) problems.push('批量重跑没挂到 window（内联/测试都调不到）');
 
 if (problems.length > 0) {
@@ -113,4 +124,4 @@ if (problems.length > 0) {
   for (const p of problems) console.error(`  - ${p}`);
   process.exit(1);
 }
-console.log(`页面脚本 OK：${js.length} 字节，经典脚本可解析，入口齐全，无「批准」，委托链路与取消/重跑都在，搜索/筛选/批量重跑/复制/键盘齐全，轮询不整表重画`);
+console.log(`页面脚本 OK：${js.length} 字节，经典脚本可解析，入口齐全，无「批准」，委托链路与取消/重跑都在，详情行内展开可收起、已结束可搜索/排序/状态过滤、批量重跑/复制/键盘齐全，轮询不整表重画`);
