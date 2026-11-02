@@ -76,6 +76,8 @@ export interface Assignment {
   state: AssignmentState;
   dir: string;         // 每个 assignment 独占目录（R06 / T06）
   sessionId: string;
+  /** 投给 worker 的首条消息正文；缺省时回落到 ticket.threadKey（历史行为）。 */
+  prompt?: string;
 }
 /** 一次报告（P5 载荷）。 */
 export interface Report {

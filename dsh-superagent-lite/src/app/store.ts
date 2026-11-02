@@ -278,6 +278,13 @@ export function createRepository(db: DatabaseSync): Repository {
            ON CONFLICT(kind, key) DO NOTHING`,
         ).run(e.kind, e.key, e.payload, e.dueAt);
       },
+      /** 只数不动：面板轮询用它。用 claimDue 数会让面板把行标成 running（实测过）。 */
+      dueCount(now) {
+        const r = db
+          .prepare(`SELECT COUNT(*) AS n FROM effect WHERE due_at <= ? AND state = 'pending'`)
+          .get(now) as any;
+        return Number(r.n);
+      },
       claimDue(now) {
         const rows = db
           .prepare(`SELECT rowid AS rid, * FROM effect WHERE due_at <= ? AND state = 'pending' ORDER BY due_at, rowid`)

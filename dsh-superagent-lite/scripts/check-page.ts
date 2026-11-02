@@ -9,7 +9,9 @@
  *   ② 没有 type=module：内联 onclick 只能调全局函数。
  *   ③ 两个入口挂在 window 上：submitTask / approve 必须能被 `onclick` 找到。
  *   ④ 有 id="send" 按钮且绑了 click / Enter。
- * 反例：把 `refresh();` 改成 `await refresh();` → ① 立刻判红。
+ *   ⑤ worker 详情这条链完整：有 data-detail 按钮、会请求 /api/worker、openWorker 挂到 window。
+ * 反例：把 `refresh();` 改成 `await refresh();` → ① 立刻判红；
+ *       删掉 `window.openWorker = openWorker;` → ⑤ 立刻判红（页面上点「详情」会静默没反应）。
  */
 import { page } from './page.ts';
 
@@ -29,6 +31,11 @@ if (!js.includes(`getElementById('send')`) || !js.includes(`addEventListener('cl
   problems.push('「下发」按钮没绑 click');
 }
 if (!js.includes(`e.key === 'Enter'`)) problems.push('输入框没绑回车提交');
+for (const fn of ['openWorker']) {
+  if (!js.includes(`window.${fn} = ${fn}`)) problems.push(`没把 ${fn} 挂到 window 上`);
+}
+if (!js.includes(`data-detail`)) problems.push('工单行没有「详情」入口（data-detail），看不到 worker 跑了什么');
+if (!js.includes(`/api/worker?id=`)) problems.push('页面没有请求 /api/worker，详情无从取数');
 
 if (problems.length > 0) {
   console.error('页面脚本判红：');

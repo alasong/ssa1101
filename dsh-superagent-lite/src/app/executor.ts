@@ -114,7 +114,8 @@ export class SessionExecutor implements Executor {
       ticketId: t.id,
       agentPreset: this.agentPreset,
       dir,
-      firstMessage: t.threadKey,
+      // 有正文就用正文：threadKey 只是线程标识（manual:m-…），当任务投给 worker 等于投了个文件名
+      firstMessage: a.prompt ?? t.threadKey,
     });
     this.handles.set(a.id, handle);
     return { ...a, dir: handle.dir, sessionId: handle.sessionId, state: 'running' };

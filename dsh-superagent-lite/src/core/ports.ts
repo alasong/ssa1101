@@ -71,6 +71,8 @@ export interface Repository {
     enqueue(e: NewEffect): void;
     /** 取出到期行并**同时**把它们标成 running（先 claim 再执行，K05 依赖这点）。 */
     claimDue(now: number): EffectRow[];
+    /** 只数不领取（页面轮询用，不能改 state）。 */
+    dueCount(now: number): number;
     /** 成功才 settle。 */
     settle(id: string): void;
     /** 可重试：写回已失败次数 + 下次到期时间 + 错误。 */

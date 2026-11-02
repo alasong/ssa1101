@@ -99,7 +99,7 @@ ssa1101/
 
 **四条文档纪律**（判据 ⑧ 只机检第 2 条，其余靠评审）：
 
-1. **单一定义点**：一个量只在它归属的文档里定义一次，别处只引用。1699 行（实测）归详设 §1.3、14 个任务归 TASKS §1、23 条 R 归 REQUIREMENTS §1——判据 ⑥ 已经在守行数那一个量，其余两个目前靠人。
+1. **单一定义点**：一个量只在它归属的文档里定义一次，别处只引用。1965 行（实测）归详设 §1.3、14 个任务归 TASKS §1、23 条 R 归 REQUIREMENTS §1——判据 ⑥ 已经在守行数那一个量，其余两个目前靠人。
 2. **大纲受本节约束**：每份交付文档的 `##` 标题必须与上表"大纲"列逐项相等（顺序也算）。要加一节，先改这张表再改文档；不改表就加节，判据 ⑧ 报红。
 3. **不写别人的内容**：需求文档不写怎么做，任务表不写需求原文，交付说明不写设计。重复一处，改的时候就会漏一处。
 4. **结构优先于篇幅**：不设行数上限（设了也只能靠人守），设的是"新增内容先挤进已有节"；确需新节就走第 2 条。`notes/` 目前 23 KB 是最大的单文件，若要继续长大，先拆成 `notes/00-输入/` 与 `notes/10-评审/` 两目录——那要同时改 §1.2、§1.2.1 与判据 ⑦。
@@ -108,15 +108,16 @@ ssa1101/
 
 | 模块 | 预算 | 职责 | 对应 R |
 |---|---|---|---|
-| `src/core/model.ts` | 107 | Event / Ticket / Mandate / Stage 纯类型 | R01、R05 |
+| `src/core/model.ts` | 109 | Event / Ticket / Mandate / Stage 纯类型 | R01、R05 |
 | `src/core/stage.ts` | 48 | 7 行 stage 判定，无 I/O | R05 |
 | `src/core/engine.ts` | 200 | **唯一写者**：intake、ticket、report 三条命令路径 | R01、R05 |
-| `src/core/ports.ts` | 85 | Executor / Outbox / Gate / Repository 四接口 | R06、R08、R11 |
+| `src/core/ports.ts` | 87 | Executor / Outbox / Gate / Repository 四接口 | R06、R08、R11 |
 | `src/app/runtime.ts` | 113 | 组合根：建库、起 pass、订阅宿主事件 | —— |
-| `src/app/store.ts` | 337 | SQLite 事务与仓储 | R18 |
+| `src/app/store.ts` | 344 | SQLite 事务与仓储 | R18 |
 | `src/app/effects.ts` | 114 | 持久副作用队列 + 退避 + 恢复 | R08、R09 |
 | `src/app/outbox.ts` | 90 | 消息保序与幂等 | R11 |
-| `src/app/executor.ts` | 148 | `sessionController` 适配（P4） | R06、R10 |
+| `src/app/executor.ts` | 149 | `sessionController` 适配（P4） | R06、R10 |
+| `src/app/dsh-session.ts` | 254 | 真宿主会话：spawn `dsh --json`，ndjson 落盘 + 结果成文 | R06、R09 |
 | `src/app/kaa.ts` | 129 | kaa CLI 调用（P7） | R03、R04、R23 |
 | `src/index.ts` | 22 | 插件入口：只把组合根暴露出去（K06） | R20 |
 | `src/sources/goal-tree.ts` | 95 | 轮询 `GET /tree` → Trigger（P1） | R01、R07 |
@@ -124,10 +125,10 @@ ssa1101/
 | `src/channel/local.ts` | 50 | 首版通道：回写 goal-tree + 控制台 | R11、R13 |
 | `src/tools/report.ts` | 55 | worker 的 report 工具（P5） | R05、R09 |
 | `src/panel/view.ts` | 53 | 面板数据视图 | R15 |
-| **合计（src）** | **1699** | 实测值（设计期估 1,300，见下） | |
+| **合计（src）** | **1965** | 实测值（设计期估 1,300，见下） | |
 | `tests/` | 500 | 见第 8 节 | R19 等 |
 
-**行数口径（两次数）**：设计期估 **1,300 行**（逐模块拆到文件级的估算）；落地后实测 **1699 行（+31%）**。多出来的部分集中在三处：`store.ts` 的仓储实现（120 → 303，六表读写 + 事务 + v1→v2 迁移）、`executor.ts` 的槽位与目录/会话/句柄三条路径（90 → 148）、`runtime.ts` 的组合根（无预算 → 94）。**以实测 1699 为准**，ARCHITECTURE 与 TASKS 已同步更正；估算偏差本身记为一条教训：把"纯逻辑行数"当预算，漏掉了仓储与接线。
+**行数口径（两次数）**：设计期估 **1,300 行**（逐模块拆到文件级的估算）；落地后实测 **1965 行（+51%）**。多出来的部分集中在三处：`store.ts` 的仓储实现（120 → 303，六表读写 + 事务 + v1→v2 迁移）、`executor.ts` 的槽位与目录/会话/句柄三条路径（90 → 148）、`runtime.ts` 的组合根（无预算 → 94）。**以实测 1965 为准**，ARCHITECTURE 与 TASKS 已同步更正；估算偏差本身记为一条教训：把"纯逻辑行数"当预算，漏掉了仓储与接线。
 
 ---
 
@@ -329,7 +330,7 @@ async function kaaDone(node: string, decl: Declarations, evidence: EvidenceMeta)
 | S6 并发竞态 | **已定**：ticket revision 乐观锁 |
 | S7 进程托管 | **不做**（R16 最后一公里，明确不在本轮） |
 | S8 面板 | 复用 `plugin-console` 加 person/* 视图，不新建 |
-| S9 成本估算 | **已给并被实测修正**：src 实测 1699 行（原估 1,300，+31%），测试 500 行 |
+| S9 成本估算 | **已给并被实测修正**：src 实测 1965 行（原估 1,300，+51%），测试 500 行 |
 
 ### 9.2 技术缺口（T1–T8）与新增
 

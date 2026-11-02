@@ -31,6 +31,7 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
  .row{display:flex;gap:8px}
  .row input{flex:1}
  #err{color:#ff7b72;font-size:12.5px;margin-top:8px;white-space:pre-wrap}
+ #detail{background:#0f1115;border:1px solid #222731;border-radius:6px;padding:10px;max-height:320px;overflow:auto}
 </style>
 <header><h1>superagent-lite 控制台</h1>
 <span class="muted" id="meta">连接中…</span></header>
@@ -47,8 +48,10 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
  <section>
   <h2>Worker 路由</h2>
   <div class="kpi" id="kpi"></div>
-  <table><thead><tr><th>工单</th><th>阶段</th><th>线程</th><th>会话</th><th>状态</th><th></th></tr></thead>
+  <table><thead><tr><th>工单</th><th>阶段</th><th>worker</th><th>worker 会话</th><th>日志行</th><th></th></tr></thead>
   <tbody id="tickets"><tr><td colspan="6" class="empty">还没有工单</td></tr></tbody></table>
+  <h2 style="margin-top:18px">Worker 详情（点「详情」看它跑了什么）</h2>
+  <pre id="detail">（还没选工单）</pre>
   <h2 style="margin-top:18px">已结束（最近 5 个）</h2>
   <pre id="ended">（还没有）</pre>
   <h2 style="margin-top:18px">最近事件</h2>
@@ -91,13 +94,48 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
     }
     tb.innerHTML = s.tickets.map(function (t) {
       return '<tr><td><code>' + esc(t.id) + '</code></td><td>' + esc(t.stage) +
-        '</td><td><code>' + esc(t.thread) + '</code></td><td><code>' + esc(t.session) +
-        '</code></td><td>' + esc(t.assignment) +
-        '</td><td><button class="ghost" data-approve="' + esc(t.id) + '">批准</button></td></tr>';
+        '</td><td><code>' + esc(t.session) + '</code> ' + esc(t.worker) +
+        '</td><td><code>' + esc(t.workerSession) + '</code></td><td>' + esc(t.lines) +
+        '</td><td><button class="ghost" data-detail="' + esc(t.id) + '">详情</button>' +
+        '<button class="ghost" data-approve="' + esc(t.id) + '">批准</button></td></tr>';
     }).join('');
   }
 
+  var selected = null;
+
+  function renderWorker(id, w) {
+    if (!w) {
+      $('detail').textContent = id + '：还没有 worker 记录（可能还没走到 launch）';
+      return;
+    }
+    var lines = ['工单 ' + id + ' → worker ' + w.runId,
+      'worker 会话：' + (w.dshSessionId || '（还没收到 session 事件）'),
+      '状态：' + w.state + ' · 退出码 ' + (w.exitCode === null ? '—' : w.exitCode) + ' · ndjson ' + w.lines + ' 行',
+      '命令：' + (w.cmd || []).join(' '),
+      '目录：' + w.dir,
+      '日志：' + w.logPath];
+    if (w.error) lines.push('错误：' + w.error);
+    if (w.stderrTail && w.stderrTail.length) lines.push('stderr 尾部：' + w.stderrTail.slice(-5).join(' / '));
+    lines.push('', '最终结果：', w.finalText || '（还没有 final 事件）');
+    if (w.tail && w.tail.length) lines.push('', '日志尾部（' + w.tail.length + ' 行）：', w.tail.slice(-12).join('\\n'));
+    $('detail').textContent = lines.join('\\n');
+  }
+
+  async function openWorker(id) {
+    selected = id;
+    try {
+      var r = await fetch('/api/worker?id=' + encodeURIComponent(id));
+      if (r.status === 404) { renderWorker(id, null); return; }
+      var w = await r.json();
+      if (!r.ok) throw new Error(w.error || ('HTTP ' + r.status));
+      renderWorker(id, w);
+    } catch (e) { showErr(e); }
+  }
+
+  window.openWorker = openWorker;
+
   async function refresh() {
+    if (selected) { void openWorker(selected); }
     try { render(await api('/api/state')); $('err').textContent = ''; }
     catch (e) { showErr(e); }
   }
@@ -123,8 +161,12 @@ export const page = `<!doctype html><html lang="zh"><meta charset="utf-8">
   document.getElementById('send').addEventListener('click', submitTask);
   $('text').addEventListener('keydown', function (e) { if (e.key === 'Enter') submitTask(); });
   document.getElementById('tickets').addEventListener('click', function (e) {
-    var id = e.target && e.target.getAttribute ? e.target.getAttribute('data-approve') : null;
-    if (id) approve(id);
+    var el = e.target;
+    if (!el || !el.getAttribute) return;
+    var detailId = el.getAttribute('data-detail');
+    if (detailId) { void openWorker(detailId); return; }
+    var approveId = el.getAttribute('data-approve');
+    if (approveId) void approve(approveId);
   });
 
   refresh();

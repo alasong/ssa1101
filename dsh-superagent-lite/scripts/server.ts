@@ -5,15 +5,22 @@
  *   打开 http://127.0.0.1:7788
  *
  * 页面每 1.5 秒拉一次 /api/state；下发任务走 POST /api/task；批准走 POST /api/approve。
- * 会话用的是**假工厂**（只生成 sessionId 与目录），所以这里看到的路由是编排层真实的
- * 派发结果，不是真的 dsh 会话——真接线见 src/app/executor.ts 的 SessionFactory。
+ *
+ * 会话是**真的**：每个 assignment spawn 一个 `dsh --profile <p> --json <任务>`，
+ * ndjson 逐行落盘到 assignment 目录（见 src/app/dsh-session.ts）。
+ * 想看派给了谁、跑出了什么：GET /api/worker?id=<ticketId>，或页面点工单行展开。
+ * 想退回不花钱的假会话：SA_WORKER=fake。
  */
 import { createServer } from 'node:http';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { startRuntime } from '../src/app/runtime.ts';
 import { SessionExecutor, SlotPool } from '../src/app/executor.ts';
+import { createDshSessionFactory } from '../src/app/dsh-session.ts';
+import type { DshRunRecord } from '../src/app/dsh-session.ts';
+import { mkdir } from 'node:fs/promises';
 import { manualEvent } from '../src/sources/manual.ts';
 import { renderPanel } from '../src/panel/view.ts';
 
@@ -32,17 +39,52 @@ const gate = {
   }),
 };
 
+const workRoot = join(homedir(), '.dsh', 'superagent-lite', 'work');
 const slots = new SlotPool({ capacity: 2, humanExtra: 1 });
+
+/** 运行记录落盘：进程重启后还能从 assignment 目录读回来（不靠内存）。 */
+const persistRun = (r: DshRunRecord): void => {
+  try {
+    mkdirSync(r.dir, { recursive: true });
+    const { tail, stderrTail, ...rest } = r;
+    void tail;
+    void stderrTail;
+    writeFileSync(join(r.dir, 'worker.json'), `${JSON.stringify(rest, null, 2)}\n`);
+  } catch {
+    /* 目录没了就算了 */
+  }
+};
+
+const fakeFactory = {
+  start: async (o: { ticketId: string; dir: string }) => ({
+    sessionId: `sess-${o.ticketId}-${Date.now().toString(36)}`,
+    dir: o.dir,
+  }),
+  deliver: async () => {},
+  stop: async () => {},
+};
+
+// worker 一律带上凭据层：headless 模板把 credentials 关着，不开它就只能是 MISSING_CREDENTIAL
+const credPatch = join(dirname(fileURLToPath(import.meta.url)), '..', 'presets', 'credentials.patch.yml');
+const dshFactory = createDshSessionFactory({
+  extraArgs: ['--patch', credPatch],
+  onChange: persistRun,
+  onEnd: persistRun,
+});
+const useFake = process.env.SA_WORKER === 'fake';
+
 const executor = new SessionExecutor({
   slots,
-  workRoot: join(homedir(), '.dsh', 'superagent-lite', 'work'),
-  factory: {
-    start: async (o) => ({ sessionId: `sess-${o.ticketId}-${Date.now().toString(36)}`, dir: o.dir }),
-    deliver: async () => {},
-    stop: async () => {},
+  workRoot,
+  factory: useFake ? fakeFactory : dshFactory,
+  // 真建目录：之前这里是空实现，assignment 的 dir 从来没被建出来过
+  mkdirp: async (d: string) => {
+    await mkdir(d, { recursive: true });
   },
-  mkdirp: async () => {},
 });
+
+/** threadKey → 任务正文。executor 只拿得到 threadKey，正文得在这里挂上去。 */
+const prompts = new Map<string, string>();
 
 const events: string[] = [];
 const log = (m: string) => {
@@ -65,6 +107,7 @@ const rt = startRuntime({
         state: 'pending',
         dir: '',
         sessionId: '',
+        prompt: prompts.get(t.threadKey) ?? t.threadKey,
       });
       rt.repo.tickets.put({ ...t, assignment: a });
       log(`launch ${t.id} → ${a.sessionId}（槽位 ${slots.used}/${slots.capacity}）`);
@@ -81,15 +124,37 @@ const endedLog: string[] = [];
 const endedCount = (): number => endedLog.length;
 const endedRecent = (): string[] => endedLog.slice(0, 5);
 
+/** 先看内存里的运行记录，再回落到 assignment 目录里的 worker.json（重启后仍可读）。 */
+const workerOf = (ticketId: string): DshRunRecord | undefined => {
+  const live = dshFactory.snapshot(ticketId);
+  if (live !== undefined) return live;
+  const t = rt.repo.tickets.get(ticketId);
+  const dir = t?.assignment?.dir;
+  if (dir === undefined || dir === '') return undefined;
+  const file = join(dir, 'worker.json');
+  if (!existsSync(file)) return undefined;
+  try {
+    return JSON.parse(readFileSync(file, 'utf8')) as DshRunRecord;
+  } catch {
+    return undefined;
+  }
+};
+
 const state = () => {
-  const tickets = rt.repo.tickets.open().map((t) => ({
-    id: t.id,
-    stage: t.stage ?? '',
-    thread: t.threadKey,
-    assignment: t.assignment?.state ?? '—',
-    session: t.assignment?.sessionId ?? '—',
-    dir: t.assignment?.dir ?? '—',
-  }));
+  const tickets = rt.repo.tickets.open().map((t) => {
+    const run = workerOf(t.id);
+    return {
+      id: t.id,
+      stage: t.stage ?? '',
+      thread: t.threadKey,
+      assignment: t.assignment?.state ?? '—',
+      session: t.assignment?.sessionId ?? '—',
+      dir: t.assignment?.dir ?? '—',
+      worker: run?.state ?? '—',
+      workerSession: run?.dshSessionId ?? '—',
+      lines: run?.lines ?? 0,
+    };
+  });
   const endedRows = rt.repo.atomic(() => 0);
   void endedRows;
   return {
@@ -100,7 +165,8 @@ const state = () => {
     slots: { used: slots.used, capacity: slots.capacity },
     live: executor.live,
     pendingEvents: rt.repo.events.pending(50).length,
-    dueEffects: rt.repo.effects.claimDue(0).length,
+    dueEffects: rt.repo.effects.dueCount(Date.now()),
+    workerMode: useFake ? 'fake' : 'dsh',
     events,
   };
 };
@@ -131,11 +197,19 @@ const server = createServer((req, res) => {
       return;
     }
     if (req.method === 'GET' && url.pathname === '/api/state') return json(200, state());
+    if (req.method === 'GET' && url.pathname === '/api/worker') {
+      const id = url.searchParams.get('id') ?? '';
+      const run = workerOf(id);
+      if (run === undefined) return json(404, { error: '这张工单还没有 worker 记录' });
+      return json(200, run);
+    }
     if (req.method === 'POST' && url.pathname === '/api/task') {
       const b = await body();
       const text = String(b.text ?? '').trim();
       if (text === '') return json(400, { error: 'text 为空' });
-      rt.repo.events.put(manualEvent({ id: `m-${Date.now()}`, text }, Date.now()));
+      const ev = manualEvent({ id: `m-${Date.now()}`, text }, Date.now());
+      prompts.set(ev.threadKey, text);
+      rt.repo.events.put(ev);
       log(`收到需求：${text}`);
       await rt.tick();
       return json(200, state());
