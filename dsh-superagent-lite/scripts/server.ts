@@ -69,7 +69,12 @@ const credPatch = join(dirname(fileURLToPath(import.meta.url)), '..', 'presets',
 const dshFactory = createDshSessionFactory({
   extraArgs: ['--patch', credPatch],
   onChange: persistRun,
-  onEnd: persistRun,
+  // worker 自己结束（跑完/失败/超时）时也要**放槽**：只有人点「取消」才放槽的话，
+  // 跑满 capacity 次以后新单一律排队，页面会把它们写成"重启后中断"（实测踩到）
+  onEnd: (r) => {
+    persistRun(r);
+    executor.releaseTicket(r.ticketId);
+  },
 });
 const useFake = process.env.SA_WORKER === 'fake';
 
@@ -159,18 +164,28 @@ const outcome = (run: DshRunRecord | undefined): string | null => {
 };
 
 /** 一张单在页面上要能看懂的全部信息：批什么、谁在做、做出什么、为什么找你要决定。 */
-const describe = (t: { id: string; threadKey: string; stage?: string; assignment?: { state?: string; sessionId?: string; dir?: string } }) => {
+const describe = (t: { id: string; threadKey: string; stage?: string; createdAt?: number; assignment?: { state?: string; sessionId?: string; dir?: string } }) => {
   const run = workerOf(t.id);
   const text = rt.repo.events.textByThread(t.threadKey) ?? '（库里找不到这条需求的原文）';
   const failed = run?.state === 'failed';
   // 四种"需要人"的来源，都要说清是哪种；否则页面上只剩一个按钮，人不知道该批什么
   const never = run === undefined && t.assignment?.state !== 'running';
+  // createdAt 只在内存里（库没有这一列）：有值 = 这个进程里新建的单，没值 = 重启前就在的单。
+  // 不分开写就会把"刚下发、还在排队"说成"重启后中断"——用户刚发的单被告知被重启打断，纯属吓人。
+  // 还没派出去有两种，处置完全不同：launch 副作用还挂着 = 排队（等着就会派发），
+  // 副作用没了 = 真中断（再等也不会动，只能重跑）。只靠 id 大小猜是不准的。
+  const queued = never && (t.createdAt !== undefined || rt.repo.effects.hasPending('launch', t.id));
+  const finished = run?.state === 'done';
   const why =
     WHY[t.stage ?? ''] ??
     (failed
       ? 'worker 跑失败了：等你决定「结束」还是重新下发'
-      : never
-        ? '还没跑起来（重启后中断）：可以「结束」它再重新下发'
+      : finished
+        ? 'worker 跑完了，等你验收：点「详情」看结果，满意就点「结束」收单'
+        : never
+        ? (queued
+          ? `排队中：还没抢到槽位（${slots.used}/${slots.capacity} 在用），前面的 worker 结束就会派发`
+          : '还没跑起来（重启后中断）：可以「结束」它再重新下发')
         : '');
   // 委托的阶段链：每一步都对得上库里的一个事实，不做"预计进度"这种编造
   const steps = [
@@ -278,6 +293,17 @@ const server = createServer((req, res) => {
       return json(200, state());
     }
     // 取消：停 worker + 结束工单（原来叫「批准」，名不副实）
+    // 验收后收单：worker 结果不动，只把这张单结束（与「取消」的区别是它不再停已跑完的会话）
+    if (req.method === 'POST' && url.pathname === '/api/close') {
+      const b = await body();
+      const t = rt.repo.tickets.get(String(b.id ?? ''));
+      if (t === undefined) return json(404, { error: '没有这张工单' });
+      if (t.assignment !== undefined) await executor.stop(t, t.assignment, 'closed-by-human');
+      rt.engine.close(t);
+      log(`人验收后收单 ${t.id}`);
+      await rt.tick();
+      return json(200, state());
+    }
     if (req.method === 'POST' && url.pathname === '/api/cancel') {
       const b = await body();
       const t = rt.repo.tickets.get(String(b.id ?? ''));

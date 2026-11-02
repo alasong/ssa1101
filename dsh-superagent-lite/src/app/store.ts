@@ -292,6 +292,13 @@ export function createRepository(db: DatabaseSync): Repository {
           .get(now) as any;
         return Number(r.n);
       },
+      /** 只读：还有没有 pending/running 的行（不 claim，不改 state）。 */
+      hasPending(kind, key) {
+        const r = db
+          .prepare(`SELECT COUNT(*) AS n FROM effect WHERE kind = ? AND key = ? AND state IN ('pending','running')`)
+          .get(kind, key) as any;
+        return Number(r.n) > 0;
+      },
       claimDue(now) {
         const rows = db
           .prepare(`SELECT rowid AS rid, * FROM effect WHERE due_at <= ? AND state = 'pending' ORDER BY due_at, rowid`)

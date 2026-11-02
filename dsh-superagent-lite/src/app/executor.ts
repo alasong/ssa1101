@@ -89,6 +89,8 @@ export class SessionExecutor implements Executor {
   private readonly mkdirp: (dir: string) => Promise<void>;
   private readonly nextId: () => string;
   private readonly handles = new Map<string, SessionHandle>();
+  /** ticketId → assignmentId：worker 自己结束时按 ticket 回收槽位（调用方不用记 assignment）。 */
+  private readonly byTicket = new Map<string, string>();
   private seq = 0;
 
   constructor(deps: ExecutorDeps) {
@@ -118,6 +120,7 @@ export class SessionExecutor implements Executor {
       firstMessage: a.prompt ?? t.threadKey,
     });
     this.handles.set(a.id, handle);
+    this.byTicket.set(t.id, a.id);
     return { ...a, dir: handle.dir, sessionId: handle.sessionId, state: 'running' };
   }
 
@@ -135,11 +138,26 @@ export class SessionExecutor implements Executor {
 
   async stop(t: Ticket, a: Assignment, reason: string): Promise<void> {
     const handle = this.handles.get(a.id);
-    if (handle !== undefined) {
-      await this.factory.stop(handle.sessionId, reason);
-      this.handles.delete(a.id);
-    }
-    this.slots.release(a.id);
+    if (handle !== undefined) await this.factory.stop(handle.sessionId, reason);
+    this.forget(a.id);
+  }
+
+  /** 会话自己结束时回收：只放槽位与句柄，不再发停止信号（它已经退了）。 */
+  forget(assignmentId: string): void {
+    this.handles.delete(assignmentId);
+    this.slots.release(assignmentId);
+  }
+
+  /**
+   * worker 结束后按 ticket 回收槽位。
+   * 不这么做就是**槽位泄漏**：launch 时 acquire 了槽，会话结束没人 release，
+   * 跑满 capacity 次以后新单一律排队，而页面还会把它写成"重启后中断"（实测踩到）。
+   */
+  releaseTicket(ticketId: string): void {
+    const aid = this.byTicket.get(ticketId);
+    if (aid === undefined) return;
+    this.byTicket.delete(ticketId);
+    this.forget(aid);
   }
 
   /** 面板/诊断用：当前在跑的会话数。 */

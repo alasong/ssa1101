@@ -227,3 +227,30 @@ test('规格 7 / 未起会话就 deliver → 抛 Later，且不投递', async ()
   assert.ok(err instanceof Later, '抛出的必须是 Later（调用方据此重试，不当致命错误）');
   assert.equal(delivers.length, 0, '没有会话时不得真的调用 factory.deliver');
 });
+
+// ── 规格 8：worker 自己结束时回收槽位（否则跑满 capacity 次就全线排队） ──
+test('规格 8 / releaseTicket：worker 结束后槽位回收，容量 1 时下一张单能派发', async () => {
+  const slots = new SlotPool({ capacity: 1, humanExtra: 1 });
+  const { executor } = makeExecutor({ slots });
+
+  await executor.start(makeTicket('t1'), makeAssignment('a1', 't1'));
+  assert.equal(slots.used, 1, '跑起来应占 1 个槽');
+  assert.equal(executor.live, 1, 'live 应看到 1 个在跑会话');
+
+  // 容量满时第二张单必须抛 Later（这是 Later，不是失败）
+  const err = await expectLater(() => executor.start(makeTicket('t2'), makeAssignment('a2', 't2')));
+  assert.ok(err instanceof Later, '槽满时必须抛 Later');
+
+  // worker 自己结束（不是人 stop）：按 ticket 回收
+  executor.releaseTicket('t1');
+  assert.equal(slots.used, 0, 'worker 结束后槽位必须回到 0');
+  assert.equal(executor.live, 0, 'live 也要归零');
+
+  // 回收之后排队的那张能派出去
+  const r2 = await executor.start(makeTicket('t2'), makeAssignment('a2', 't2'));
+  assert.equal(typeof r2.sessionId, 'string', '回收后第二张单必须能真的派出去');
+  assert.equal(slots.used, 1);
+
+  // 幂等：对不存在的 ticket 回收不抛
+  executor.releaseTicket('t-not-exist');
+});

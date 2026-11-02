@@ -75,6 +75,8 @@ export interface Repository {
     claimDue(now: number): EffectRow[];
     /** 只数不领取（页面轮询用，不能改 state）。 */
     dueCount(now: number): number;
+    /** 这条 (kind,key) 还没有未了结的行：页面用它区分「排队中」与「真中断」。 */
+    hasPending(kind: EffectKind, key: string): boolean;
     /** 成功才 settle。 */
     settle(id: string): void;
     /** 可重试：写回已失败次数 + 下次到期时间 + 错误。 */

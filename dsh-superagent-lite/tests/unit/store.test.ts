@@ -193,3 +193,28 @@ test('规格6 幂等迁移：同一库文件连续 openDb 两次仍 6 张表且�
   migrate(second);
   assert.equal(readUserVersion(second), SCHEMA_VERSION);
 });
+
+// ── 规格 9：hasPending 只读、不 claim（页面用它区分「排队中」与「真中断」） ──
+test('规格 9 / hasPending：pending/running 为真，settle 之后为假，且查询不改 state', async () => {
+  const { createRepository } = await import('../../src/app/store.ts');
+  const file = tempDbPath();
+  const db = openDb(file);
+  migrate(db);
+  try {
+    const repo = createRepository(db);
+    repo.effects.enqueue({ kind: 'launch', key: 't1', payload: '{}', dueAt: 0 });
+
+    assert.equal(repo.effects.hasPending('launch', 't1'), true, '排队中的单必须被认为"还会跑"');
+    assert.equal(repo.effects.hasPending('launch', 't2'), false, '没有这条就是没有');
+    assert.equal(repo.effects.dueCount(10), 1, 'hasPending 不能把行标成 running（那会让它不再到期）');
+
+    const rows = repo.effects.claimDue(10);
+    assert.equal(rows.length, 1);
+    assert.equal(repo.effects.hasPending('launch', 't1'), true, 'claim 之后仍在跑，算未了结');
+    repo.effects.settle(rows[0].id);
+    assert.equal(repo.effects.hasPending('launch', 't1'), false, 'settle 之后就不算未了结了');
+  } finally {
+    db.close();
+    cleanupDbFiles(file);
+  }
+});
